@@ -1,17 +1,14 @@
-FROM dolfinx/dev-env:stable
-RUN apt-get -y update && apt-get install -y python3-venv
+FROM dolfinx/dolfinx:stable
+# RUN apt-get -y update && apt-get install -y python3-venv
 
 # Path to venv
-RUN mkdir /opt/venv
-ENV VIRTUAL_ENV=/opt/venv
-
-# Allow user fenics to access venv directories
-# RUN chown fenics: $VIRTUAL_ENV
+# RUN mkdir /opt/venv
+# ENV VIRTUAL_ENV=/opt/venv
 
 # Create venv
-RUN python3 -m venv --system-site-packages $VIRTUAL_ENV
-ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+# RUN python3 -m venv --system-site-packages $VIRTUAL_ENV
+# ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install dependencies:
-COPY requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && pip install -IUr /app/requirements.txt
+RUN pip install matplotlib pandas jax
+ENV PYTHONPATH="$PYTHONPATH:/home/dolfinx/shared/phiFEM/"

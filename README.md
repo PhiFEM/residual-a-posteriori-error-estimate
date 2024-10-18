@@ -5,7 +5,8 @@ It contains also some python libraries dependencies.
 
 To build the image:
 ```bash
-cd docker
+docker login
+cd docker/
 sudo bash build_image.sh
 ```
 
