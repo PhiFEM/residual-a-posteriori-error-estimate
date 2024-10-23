@@ -1,6 +1,8 @@
 import dolfinx as dfx
 import numpy as np
 
+# TODO: Modify to use in parallel
+
 def _select_entities(mesh, levelset, edim):
     """ Compute the list of entities strictly inside Omega_h and the list of entities having a non-empty intersection with Gamma_h.
 
@@ -30,47 +32,75 @@ def _select_entities(mesh, levelset, edim):
     interior_entities = np.setdiff1d(entities, exterior_entities)
     # Cells case
     # List entities having a non-empty intersection with Gamma_h
-    boundary_entities = np.setdiff1d(interior_entities, list_interior_entities)
+    cut_entities = np.setdiff1d(interior_entities, list_interior_entities)
 
-    return list_interior_entities, boundary_entities
+    return list_interior_entities, cut_entities, exterior_entities
 
 def tag_entities(mesh,
                  levelset,
                  edim,
-                 tag_interior=1,
-                 tag_boundary=2):
-    """ Compute the entity tags for the interior (Omega_h) and the boundary (set of cells having a non empty intersection with Gamma_h).
+                 cells_tags=None):
+    """ Compute the entity tags for the interior (Omega_h) and the cut (set of cells having a non empty intersection with Gamma_h).
+    Tag = 1: interior (Omega_h)
+    Tag = 2: cut (Omega_Gamma_h)
+    Tag = 3: exterior (entities strictly outside Omega_h)
+    Tag = 4: Gamma_h (for facets only, edim < mesh.topology.dim)
 
     Args:
         mesh: the background mesh.
         levelset: a Levelset object.
         edim: dimension of the entities.
-        tag_interior (int): the tag used to label the entities of Omega_h (default: 1).
-        tag_boundary (int): the tag used to label the entities with an non-empty intersection with Gamma_h (default: 2).
+        cells_tags (Meshtags object): the cells tags (default: None).
 
     Returns:
         A meshtags object.
     """
 
-    # We need to go through cells selection even if edim < mesh.topology.dim
+    # If cells_tags is not provided, we need to go through cells selection.
     cdim = mesh.topology.dim
-    interior_entities, boundary_fronteer_entities = _select_entities(mesh, levelset, cdim)
+    if cells_tags is None:
+        interior_entities, cut_fronteer_entities, exterior_entities = _select_entities(mesh, levelset, cdim)
+    else:
+        interior_entities     = cells_tags.indices[np.where(cells_tags.values == 1)]
+        cut_fronteer_entities = cells_tags.indices[np.where(cells_tags.values == 2)]
+        exterior_entities     = cells_tags.indices[np.where(cells_tags.values == 3)]
 
     if edim == mesh.topology.dim - 1:
-        # Get the indices of facets belonging to cells in interior_entities and boundary_fronteer_entities
+        # Get the indices of facets belonging to cells in interior_entities and cut_fronteer_entities
         mesh.topology.create_connectivity(cdim, edim)
         c2f_connect = mesh.topology.connectivity(cdim, edim)
         num_facets_per_cell = len(c2f_connect.links(0))
         c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
-        fronteer_facets = np.intersect1d(c2f_map[interior_entities], c2f_map[boundary_fronteer_entities])
+        interior_boundary_facets = np.intersect1d(c2f_map[interior_entities],
+                                                  c2f_map[cut_fronteer_entities])
+        boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
+                                         c2f_map[exterior_entities])
 
-        interior_fronteer_facets, boundary_facets = _select_entities(mesh, levelset, edim)
-        interior_entities = np.setdiff1d(interior_fronteer_facets, fronteer_facets)
-        boundary_fronteer_entities = np.union1d(boundary_facets, fronteer_facets)
+        interior_fronteer_facets, cut_facets, exterior_facets = _select_entities(mesh, levelset, edim)
+        interior_facets = np.setdiff1d(interior_fronteer_facets, interior_boundary_facets)
+        cut_facets = np.union1d(cut_facets, interior_boundary_facets)
+        exterior_facets = np.setdiff1d(exterior_facets, boundary_facets)
+        
+        # Add the boundary facets to the proper lists of facets
+        background_boundary_facets = dfx.mesh.locate_entities_boundary(mesh,
+                                                                       edim,
+                                                                       lambda x: np.ones_like(x[1]).astype(bool))
+        intersect_exterior_boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], background_boundary_facets)
+        exterior_facets = np.setdiff1d(exterior_facets, intersect_exterior_boundary_facets)
+        boundary_facets = np.union1d(boundary_facets, intersect_exterior_boundary_facets)
 
-    entities_indices = np.hstack([interior_entities, boundary_fronteer_entities]).astype(np.int32)
-    entities_markers = np.hstack([np.full_like(interior_entities, tag_interior),
-                                  np.full_like(boundary_fronteer_entities, tag_boundary)]).astype(np.int32)
+        lists = [interior_facets,
+                 cut_facets,
+                 exterior_facets,
+                 boundary_facets]
+    elif edim == mesh.topology.dim:
+        lists = [interior_entities,
+                 cut_fronteer_entities,
+                 exterior_entities]
+
+    list_markers = [np.full_like(l, i+1) for i, l in enumerate(lists)]
+    entities_indices = np.hstack(lists).astype(np.int32)
+    entities_markers = np.hstack(list_markers).astype(np.int32)
 
     sorted_indices = np.argsort(entities_indices)
 
