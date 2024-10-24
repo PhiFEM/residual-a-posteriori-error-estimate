@@ -41,7 +41,7 @@ def tag_entities(mesh,
                  edim,
                  cells_tags=None):
     """ Compute the entity tags for the interior (Omega_h) and the cut (set of cells having a non empty intersection with Gamma_h).
-    Tag = 1: interior (Omega_h)
+    Tag = 1: interior strict (Omega_h \ Omega_Gamma_h)
     Tag = 2: cut (Omega_Gamma_h)
     Tag = 3: exterior (entities strictly outside Omega_h)
     Tag = 4: Gamma_h (for facets only, edim < mesh.topology.dim)
