@@ -1,9 +1,7 @@
 import basix as bx
 from basix.ufl import element
-from basix import CellType, ElementFamily
 import dolfinx as dfx
-from dolfinx.fem import assemble_scalar
-from dolfinx.fem.petsc import assemble_matrix, assemble_vector, create_vector, set_bc
+from dolfinx.fem import assemble_scalar, assemble_vector
 from dolfinx.io import XDMFFile, gmshio
 import jax
 import jax.numpy as jnp
@@ -13,27 +11,31 @@ import os
 import pandas as pd
 from petsc4py import PETSc
 import ufl
-from ufl import inner, jump, grad, div, dot, avg
+from ufl import inner, jump, grad, div, avg
 
 from utils.compute_meshtags import tag_entities
-from utils.classes import Levelset, ExactSolution
+from utils.classes import Levelset, ExactSolution, PhiFEMSolver
+from utils.mesh_scripts import compute_facets_to_refine
 
 output_dir = "output"
-ref_max = 5
-angle = np.pi/6.
-quadrature_degree = 4  # Quadrature degree for P1
+N = 20
+max_it = 8
+quadrature_degree = 4
 sigma_D = 1.
+tilt_angle = np.pi/6.
 
-def rotation(x):
+def rotation(angle, x):
     return (jnp.cos(angle)*x[0] + jnp.sin(angle)*x[1], -jnp.sin(angle)*x[0] + jnp.cos(angle)*x[1])
 
+# Defines a tilted square
 def expression_levelset(x, y):
-    return rotation([x, y])[0]**100 + rotation([x, y])[1]**100 - 1
+    return np.exp(-1./(np.abs(rotation(tilt_angle - np.pi/4., [x, y])[0])+np.abs(rotation(tilt_angle - np.pi/4., [x, y])[1]))) - np.exp(-0.75)
 
 def u_exact(x):
-    return np.sin(2. * np.pi * rotation(x)[0]) * np.sin(2. * np.pi * rotation(x)[1])
+    return np.sin(2. * np.pi * rotation(tilt_angle, x)[0]) * np.sin(2. * np.pi * rotation(tilt_angle, x)[1])
 
-u_exact = ExactSolution(lambda x, y: jnp.sin(np.pi * rotation((x,y))[0]) * jnp.sin(np.pi * rotation((x,y))[1]))
+u_exact = ExactSolution(lambda x, y: jnp.sin(np.pi * rotation(tilt_angle, (x,y))[0]) *
+                                     jnp.sin(np.pi * rotation(tilt_angle, (x,y))[1]))
 f = u_exact.negative_laplacian()
 
 if not os.path.isdir(output_dir):
@@ -45,104 +47,132 @@ phi = Levelset(expression_levelset)
 """
 Read mesh
 """
-print("Read mesh")
-mesh, cell_tags, facet_tags = gmshio.read_from_msh("./background.msh", MPI.COMM_WORLD, gdim=2)
+print("Create mesh")
+mesh = dfx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
 
-print("Creation FE space and data interpolation")
-CG1Element = element("CG", mesh.topology.cell_name(), 1)
-V = dfx.fem.functionspace(mesh, CG1Element)
-phiV = dfx.fem.Function(V)
-phiV.interpolate(phi.dolfinx_call)
-fV = dfx.fem.Function(V)
-fV.interpolate(f)
-
-print("Compute entities tags")
-cells_tags  = tag_entities(mesh, phi, mesh.topology.dim, )
-facets_tags = tag_entities(mesh, phi, mesh.topology.dim - 1)
-
-print("Define measures and set up FE problem")
-DG0Element = element("DG", mesh.topology.cell_name(), 0)
-V0 = dfx.fem.functionspace(mesh, DG0Element)
-v0 = dfx.fem.Function(V0)
-v0.vector.set(0.)
-v0.vector.array[cells_tags.indices[np.where(cells_tags.values == 1)]] = 1.
-
-dx = ufl.Measure("dx",
-                    domain=mesh,
-                    subdomain_data=cells_tags,
-                    metadata={"quadrature_degree": quadrature_degree})
-
-dS = ufl.Measure("dS",
-                domain=mesh,
-                subdomain_data=facets_tags,
-                metadata={"quadrature_degree": quadrature_degree})
-
-
-h = ufl.CellDiameter(mesh)
-n = ufl.FacetNormal(mesh)
-
-w = ufl.TrialFunction(V)
-v = ufl.TestFunction(V)
-
-# This term is useless (always zero, everybody hate it)
-# but PETSc complains if I don't include it
-useless = inner(w, v) * v0 * dx(3)
-
-a = inner(grad(phiV * w), grad(phiV * v)) * dx(1) + inner(grad(phiV * w), grad(phiV * v)) * dx(2) \
-    - inner(jump(grad(phiV * w), grad(phiV)), jump(phiV * v * v0)) * dS(4) \
-    + sigma_D * avg(h) * inner(jump(grad(phiV * w), n), jump(grad(phiV * v), n)) * dS(2) \
-    + sigma_D * h**2 * inner(div(grad(phiV * w)), div(grad(phiV * v))) * dx(2) \
-    + useless
-
-L = inner(fV, phiV * v) * dx(1) + inner(fV, phiV * v) * dx(2) \
-    - sigma_D * h**2 * inner(fV, div(grad(phiV * v))) * dx(2)
-
-wh = dfx.fem.Function(V)
-wh.vector.set(0.0)
-
-a_form = dfx.fem.form(a)
-b_form = dfx.fem.form(L)
-print("Matrix and RHS assembly")
-A = assemble_matrix(a_form)
-A.assemble()
-b = assemble_vector(b_form)
-
-# Parametrization of the PETSc solver
-options = PETSc.Options()
-options["ksp_type"] = "cg"
-options["pc_type"] = "hypre"
-options["ksp_rtol"] = 1e-7
-options["pc_hypre_type"] = "boomeramg"
-solver = PETSc.KSP().create(MPI.COMM_WORLD)
-solver.setOperators(A)
-solver.setFromOptions()
-
-# Solve
-print("Solve")
-solver.solve(b, wh.vector)
-
-print("Interpolation exact solution and save output")
-u_exact_V = dfx.fem.Function(V)
-u_exact_V.interpolate(u_exact.dolfinx_call)
-
-uh = dfx.fem.Function(V)
-uh.vector.array = wh.vector.array * phiV.vector.array
-
-eh = dfx.fem.Function(V)
-eh.vector.array = uh.vector.array - u_exact_V.vector.array
-
-with XDMFFile(mesh.comm, f"output/uh.xdmf", "w") as of:
+with XDMFFile(mesh.comm, "./square.xdmf", "w") as of:
     of.write_mesh(mesh)
-    of.write_function(uh)
 
-with XDMFFile(mesh.comm, f"output/u_exact_V.xdmf", "w") as of:
-    of.write_mesh(mesh)
-    of.write_function(u_exact_V)
+# Shift and scale the mesh
+mesh.geometry.x[:, 0] -= 0.5
+mesh.geometry.x[:, 1] -= 0.5
+mesh.geometry.x[:, 0] *= 4.
+mesh.geometry.x[:, 1] *= 4.
 
-with XDMFFile(mesh.comm, f"output/phi_V.xdmf", "w") as of:
-    of.write_mesh(mesh)
-    of.write_function(phiV)
+results = {"dofs": [], "H10 error": [], "L2 error": []}
+for i in range(max_it):
+    print(f"Iteration n° {str(i).zfill(2)}: Creation FE space and data interpolation")
+    CG1Element = element("CG", mesh.topology.cell_name(), 1)
+    CG2Element = element("CG", mesh.topology.cell_name(), 2)
+    V = dfx.fem.functionspace(mesh, CG1Element)
+    Vf = dfx.fem.functionspace(mesh, CG2Element)
+    phiV = dfx.fem.Function(V)
+    phiV.interpolate(phi.dolfinx_call)
+    extV = dfx.fem.Function(V)
+    extV.interpolate(phi.exterior(0.))
 
-with XDMFFile(mesh.comm, f"output/eh.xdmf", "w") as of:
-    of.write_mesh(mesh)
-    of.write_function(eh)
+    # TODO: change the way dofs are counted
+    results["dofs"].append(sum(np.where(phiV.x.array < 0., 1, 0)))
+    fV = dfx.fem.Function(V)
+    fV.interpolate(f)
+
+    wh = dfx.fem.Function(V)
+    wh.vector.set(0.0)
+
+    # Parametrization of the PETSc solver
+    options = PETSc.Options()
+    options["ksp_type"] = "cg"
+    options["pc_type"] = "hypre"
+    options["ksp_rtol"] = 1e-7
+    options["pc_hypre_type"] = "boomeramg"
+    petsc_solver = PETSc.KSP().create(MPI.COMM_WORLD)
+    petsc_solver.setFromOptions()
+
+    phiFEM_solver = PhiFEMSolver(petsc_solver, i)
+    print(f"Iteration n° {str(i).zfill(2)}: Data interpolation.")
+    phiFEM_solver.set_data(fV, phi)
+    print(f"Iteration n° {str(i).zfill(2)}: Mesh tags computation.")
+    phiFEM_solver.compute_tags(mesh)
+    print(f"Iteration n° {str(i).zfill(2)}: Variational formulation set up.")
+    v0 = phiFEM_solver.set_variational_formulation(V)
+    print(f"Iteration n° {str(i).zfill(2)}: Linear system assembly.")
+    phiFEM_solver.assembly()
+    print(f"Iteration n° {str(i).zfill(2)}: Solve.")
+    phiFEM_solver.solve(wh)
+
+    uh = dfx.fem.Function(V)
+    uh.x.array[:] = wh.x.array * phiV.x.array
+
+    print(f"Iteration n° {str(i).zfill(2)}: Ouput save and error computation.")
+    u_exact_V = dfx.fem.Function(V)
+    u_exact_V.interpolate(u_exact.dolfinx_call)
+
+    CG2Element = element("CG", mesh.topology.cell_name(), 2)
+    V2 = dfx.fem.functionspace(mesh, CG2Element)
+
+    u_exact_V2 = dfx.fem.Function(V2)
+    u_exact_V2.interpolate(u_exact.dolfinx_call)
+    uh_V2 = dfx.fem.Function(V2)
+    uh_V2.interpolate(uh)
+    e_V2 = dfx.fem.Function(V2)
+    e_V2.x.array[:] = u_exact_V2.x.array - uh_V2.x.array
+
+    dx2 = ufl.Measure("dx",
+                      domain=mesh,
+                      subdomain_data=phiFEM_solver.cells_tags,
+                      metadata={"quadrature_degree": 6})
+
+    H10_norm = inner(grad(e_V2), grad(e_V2)) * v0 * dx2(1) + inner(grad(e_V2), grad(e_V2)) * v0 * dx2(2)
+    H10_form = dfx.fem.form(H10_norm)
+    results["H10 error"].append(np.sqrt(assemble_scalar(H10_form)))
+    L2_norm = inner(e_V2, e_V2) * v0 * dx2(1) + inner(e_V2, e_V2) * v0 * dx2(2)
+    L2_form = dfx.fem.form(L2_norm)
+    results["L2 error"].append(np.sqrt(assemble_scalar(L2_form)))
+
+    DG0Element = element("DG", mesh.topology.cell_name(), 0)
+    V0 = dfx.fem.functionspace(mesh, DG0Element)
+
+    w0 = ufl.TrialFunction(V0)
+    L2_error_0 = dfx.fem.Function(V0)
+    H10_error_0 = dfx.fem.Function(V0)
+
+    L2_norm_local = inner(inner(e_V2, e_V2), w0) * v0 * dx2(1) + inner(inner(e_V2, e_V2), w0) * v0 * dx2(2)
+    L2_norm_local_form = dfx.fem.form(L2_norm_local)
+    L2_error_0.x.array[:] = assemble_vector(L2_norm_local_form).array
+    with XDMFFile(mesh.comm, f"output/L2_error_{str(i).zfill(2)}.xdmf", "w") as of:
+        of.write_mesh(mesh)
+        of.write_function(L2_error_0)
+
+    H10_norm_local = inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(1) + inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(2)
+    H10_norm_local_form = dfx.fem.form(H10_norm_local)
+    H10_error_0.x.array[:] = assemble_vector(H10_norm_local_form).array
+    with XDMFFile(mesh.comm, f"output/H10_error_{str(i).zfill(2)}.xdmf", "w") as of:
+        of.write_mesh(mesh)
+        of.write_function(H10_error_0)
+
+    df = pd.DataFrame(results)
+    print(df)
+    df.to_csv("./output/results.csv")
+    with XDMFFile(mesh.comm, f"output/uh_{str(i).zfill(2)}.xdmf", "w") as of:
+        of.write_mesh(mesh)
+        of.write_function(uh)
+
+    with XDMFFile(mesh.comm, f"output/u_exact_V_{str(i).zfill(2)}.xdmf", "w") as of:
+        of.write_mesh(mesh)
+        of.write_function(u_exact_V)
+
+    with XDMFFile(mesh.comm, f"output/phi_V_{str(i).zfill(2)}.xdmf", "w") as of:
+        of.write_mesh(mesh)
+        of.write_function(phiV)
+
+    with XDMFFile(mesh.comm, f"output/exterior_{str(i).zfill(2)}.xdmf", "w") as of:
+        of.write_mesh(mesh)
+        of.write_function(extV)
+
+    if i < max_it:
+        facets_tags = phiFEM_solver.facets_tags
+        facets_to_refine = compute_facets_to_refine(mesh, facets_tags)
+        print(f"Iteration n° {str(i).zfill(2)}: Mesh refinement.")
+        mesh = dfx.mesh.refine(mesh, facets_to_refine)
+        # mesh = dfx.mesh.refine(mesh)
+    print("\n")
