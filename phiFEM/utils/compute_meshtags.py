@@ -70,6 +70,7 @@ def tag_entities(mesh,
         mesh.topology.create_connectivity(cdim, edim)
         c2f_connect = mesh.topology.connectivity(cdim, edim)
         num_facets_per_cell = len(c2f_connect.links(0))
+        # Note: here the reshape does not need any special treatment since all cells have the same number of facets.
         c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
         interior_boundary_facets = np.intersect1d(c2f_map[interior_entities],
                                                   c2f_map[cut_fronteer_entities])
@@ -81,7 +82,7 @@ def tag_entities(mesh,
         cut_facets = np.union1d(cut_facets, interior_boundary_facets)
         exterior_facets = np.setdiff1d(exterior_facets, boundary_facets)
         
-        # Add the boundary facets to the proper lists of facets
+        # Add the boundary facets to the proper lists of facets (shouldn't be necessary since the intersection of Gamma_h with the boundary of the box should be empty)
         background_boundary_facets = dfx.mesh.locate_entities_boundary(mesh,
                                                                        edim,
                                                                        lambda x: np.ones_like(x[1]).astype(bool))

@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from utils.negative_laplacian import negative_laplacian
+from utils.derivatives import negative_laplacian
 
 """
 Data_n° = ("Fct formula",      num_var, (lambda x: expression fct),                         (lambda x: expression negative laplacian))
