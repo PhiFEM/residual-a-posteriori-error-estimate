@@ -34,14 +34,8 @@ def compute_outward_normal(mesh, mesh_tags, levelset):
     w0.sub(0).interpolate(dfx.fem.Expression(normal_Omega_h[0], W0.sub(0).element.interpolation_points()))
     w0.sub(1).interpolate(dfx.fem.Expression(normal_Omega_h[1], W0.sub(1).element.interpolation_points()))
 
-    dofs_0 = dfx.fem.locate_dofs_topological(W0.sub(0), mesh.topology.dim, cells_tags.indices[np.where(np.logical_or(cells_tags.values == 1, cells_tags.values == 3))])
-    dofs_1 = dfx.fem.locate_dofs_topological(W0.sub(1), mesh.topology.dim, cells_tags.indices[np.where(np.logical_or(cells_tags.values == 1, cells_tags.values == 3))])
-    w0.sub(0).x.array[dofs_0] = 0.
-    w0.sub(1).x.array[dofs_1] = 0.
-
-    # with dfx.io.XDMFFile(mesh.comm, f"./output/Omega_h_normal_{str(self.i).zfill(2)}.xdmf", "w") as of:
-    #     of.write_mesh(mesh)
-    #     of.write_function(w0)
+    w0.sub(0).x.array[:] = np.nan_to_num(w0.sub(0).x.array, nan=0.0)
+    w0.sub(1).x.array[:] = np.nan_to_num(w0.sub(1).x.array, nan=0.0)
     return w0
 
 def reshape_facets_map(f2c_connect):
@@ -137,7 +131,7 @@ def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False):
                     midpoint = np.sum(points[vertices], axis=0)/np.shape(points[vertices])[0]
                     ax.text(midpoint[0], midpoint[1], f"{f}", horizontalalignment="center", verticalalignment="center", fontsize=6)
         mappable: mpl.collections.Collection = mpl.collections.LineCollection(  # type: ignore[no-redef]
-            lines, cmap="tab10", norm=norm, colors=lines_colors_as_str, linestyles=lines_linestyles)
+            lines, cmap="tab10", norm=norm, colors=lines_colors_as_str, linestyles=lines_linestyles, linewidth=0.1)
         mappable.set_array(np.array(lines_colors_as_int))
         ax.add_collection(mappable)
         ax.autoscale()

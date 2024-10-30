@@ -72,22 +72,21 @@ class PhiFEMSolver:
         if plot:
             figure, ax = plt.subplots()
             plot_mesh_tags(mesh, self.facets_tags, ax=ax, display_indices=False)
-            plt.savefig("./output/test_facets.png", dpi=1200)
+            plt.savefig(f"./output/test_facets_{str(self.i).zfill(2)}.svg", format="svg", dpi=2400)
             figure, ax = plt.subplots()
             plot_mesh_tags(mesh, self.cells_tags, ax=ax, display_indices=False)
-            plt.savefig("./output/test_cells.png", dpi=1200)
+            plt.savefig(f"./output/test_cells_{str(self.i).zfill(2)}.svg", format="svg", dpi=2400)
 
     def set_variational_formulation(self, FE_space, sigma=1., quadrature_degree=None, levelset_space=None):
         mesh = FE_space.mesh
+        if levelset_space is None:
+            levelset_space = FE_space
+        
         if quadrature_degree is None:
-            quadrature_degree = 2 * (FE_space.element.basix_element.degree + 1)
+            quadrature_degree = 2 * (levelset_space.element.basix_element.degree + 1)
 
         phi = self.levelset
-
-        if levelset_space is None:
-            phi_disc = dfx.fem.Function(FE_space)
-        else:
-            phi_disc = dfx.fem.Function(levelset_space)
+        phi_disc = dfx.fem.Function(levelset_space)
         phi_disc.interpolate(phi.dolfinx_call)
 
         f = self.rhs
@@ -115,7 +114,16 @@ class PhiFEMSolver:
         v = ufl.TestFunction(FE_space)
 
         Omega_h_n = self._compute_normal(mesh)
+        # Omega_h_n = grad(phi_disc) / (ufl.sqrt(inner(grad(phi_disc), grad(phi_disc))))
+        DG0VecElement = element("DG", mesh.topology.cell_name(), 0, shape=(mesh.topology.dim,))
+        W0 = dfx.fem.functionspace(mesh, DG0VecElement)
+        w0 = dfx.fem.Function(W0)
+        w0.sub(0).interpolate(dfx.fem.Expression(Omega_h_n[0], W0.sub(0).element.interpolation_points()))
+        w0.sub(1).interpolate(dfx.fem.Expression(Omega_h_n[1], W0.sub(1).element.interpolation_points()))
 
+        with dfx.io.XDMFFile(mesh.comm, f"./output/Omega_h_n_{str(self.i).zfill(2)}.xdmf", "w") as of:
+            of.write_mesh(mesh)
+            of.write_function(w0)
         dx = ufl.Measure("dx",
                          domain=mesh,
                          subdomain_data=self.cells_tags,
@@ -125,49 +133,35 @@ class PhiFEMSolver:
                          domain=mesh,
                          subdomain_data=self.facets_tags,
                          metadata={"quadrature_degree": quadrature_degree})
-        
+
         """
         Bilinear form
         """
-        stiffness = inner(grad(phi_disc * w), grad(phi_disc * v)) * dx(1) \
-                  + inner(grad(phi_disc * w), grad(phi_disc * v)) * dx(2)
+        stiffness = inner(grad(phi_disc * w), grad(phi_disc * v))
         boundary = inner(2. * avg(inner(grad(phi_disc * w), Omega_h_n) * v0),
-                         2. * avg(phi_disc * v * v0)) * dS(4)
+                         2. * avg(phi_disc * v * v0))
         penalization_facets = sigma * avg(h) * inner(jump(grad(phi_disc * w), n),
-                                                     jump(grad(phi_disc * v), n)) * dS(2)
+                                                     jump(grad(phi_disc * v), n))
         penalization_cells = sigma * h**2 * inner(div(grad(phi_disc * w)),
-                                                  div(grad(phi_disc * v))) * dx(2)
+                                                  div(grad(phi_disc * v)))
         # This term is useless (always zero, everybody hate it)
         # but PETSc complains if I don't include it
-        useless = inner(w, v) * v0 * dx(3)
+        useless = inner(w, v) * v0
 
-        a = stiffness \
-            - boundary \
-            + penalization_facets \
-            + penalization_cells \
-            + useless
+        a = stiffness             * (dx(1) + dx(2)) \
+            - boundary            * dS(4) \
+            + penalization_facets * dS(2) \
+            + penalization_cells  * dx(2) \
+            + useless             * dx(3)
         
-        # names = ["stiffness", "boundary", "penalization_facets", "penalization_cells", "useless"]
-        # terms = [ stiffness,   boundary,   penalization_facets,   penalization_cells,   useless ]
-        # for name, term in zip(names, terms):
-        #     print(name)
-        #     form = dfx.fem.form(term)
-        #     Mat = assemble_matrix(form)
-        #     Mat.assemble()
-        #     B = Mat.convert("dense")
-        #     C = B.getDenseArray()
-        #     print(np.max(np.abs(C)))
-        # assert 1==2
-
         """
         Linear form
         """
-        rhs = inner(f, phi_disc * v) * dx(1) \
-            + inner(f, phi_disc * v) * dx(2)
-        penalization_rhs = sigma * h**2 * inner(f, div(grad(phi_disc * v))) * dx(2)
+        rhs = inner(f, phi_disc * v)
+        penalization_rhs = sigma * h**2 * inner(f, div(grad(phi_disc * v)))
 
-        L = rhs \
-            - penalization_rhs
+        L = rhs                 * (dx(1) + dx(2))\
+            - penalization_rhs  * dx(2)
 
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)

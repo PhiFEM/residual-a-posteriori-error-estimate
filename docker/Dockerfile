@@ -10,5 +10,5 @@ FROM dolfinx/dolfinx:stable
 # ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install dependencies:
-RUN pip install matplotlib pandas jax
+RUN pip install matplotlib pandas jax meshio pygmsh
 ENV PYTHONPATH="$PYTHONPATH:/home/dolfinx/shared/phiFEM/"

@@ -1,0 +1,12 @@
+*.h5
+*.xdmf
+*.png
+*.svg
+**/output
+**/.vscode
+**/__pycache__/
+*.csv
+**/killian/
+**/temp/
+**/.pytest_cache
+**/*.pdf

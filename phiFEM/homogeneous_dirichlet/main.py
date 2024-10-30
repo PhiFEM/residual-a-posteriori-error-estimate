@@ -17,9 +17,11 @@ from utils.compute_meshtags import tag_entities
 from utils.classes import Levelset, ExactSolution, PhiFEMSolver
 from utils.mesh_scripts import compute_facets_to_refine
 
+parent_dir = os.path.dirname(__file__)
+
 output_dir = "output"
 N = 20
-max_it = 8
+max_it = 7
 quadrature_degree = 4
 sigma_D = 1.
 tilt_angle = np.pi/6.
@@ -29,35 +31,44 @@ def rotation(angle, x):
 
 # Defines a tilted square
 def expression_levelset(x, y):
-    return np.exp(-1./(np.abs(rotation(tilt_angle - np.pi/4., [x, y])[0])+np.abs(rotation(tilt_angle - np.pi/4., [x, y])[1]))) - np.exp(-0.75)
+    fct = lambda x, y: jnp.exp(-1./(jnp.abs(rotation(tilt_angle - jnp.pi/4., [x, y])[0])+jnp.abs(rotation(tilt_angle - jnp.pi/4., [x, y])[1])))
 
-def u_exact(x):
-    return np.sin(2. * np.pi * rotation(tilt_angle, x)[0]) * np.sin(2. * np.pi * rotation(tilt_angle, x)[1])
+    shift = fct(np.cos(tilt_angle)/2., np.sin(tilt_angle)/2.)
 
-u_exact = ExactSolution(lambda x, y: jnp.sin(np.pi * rotation(tilt_angle, (x,y))[0]) *
-                                     jnp.sin(np.pi * rotation(tilt_angle, (x,y))[1]))
+    return fct(x, y) - shift
+
+def expression_u_exact(x, y):
+    return jnp.sin(2. * jnp.pi * rotation(tilt_angle, [x, y])[0]) * jnp.sin(2. * jnp.pi * rotation(tilt_angle, [x, y])[1])
+
+phi = Levelset(expression_levelset)
+u_exact = ExactSolution(expression_u_exact)
 f = u_exact.negative_laplacian()
 
 if not os.path.isdir(output_dir):
 	print(f"{output_dir} directory not found, we create it.")
 	os.mkdir(os.path.join(".", output_dir))
 
-phi = Levelset(expression_levelset)
-
 """
 Read mesh
 """
-print("Create mesh")
-mesh = dfx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
+mesh_path_xdmf = os.path.join(parent_dir, "square.xdmf")
+mesh_path_h5   = os.path.join(parent_dir, "square.h5")
 
-with XDMFFile(mesh.comm, "./square.xdmf", "w") as of:
-    of.write_mesh(mesh)
+if (not os.path.isfile(mesh_path_h5)) or (not os.path.isfile(mesh_path_xdmf)):
+    print(f"{mesh_path} not found, we create it.")
+    mesh = dfx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
 
-# Shift and scale the mesh
-mesh.geometry.x[:, 0] -= 0.5
-mesh.geometry.x[:, 1] -= 0.5
-mesh.geometry.x[:, 0] *= 4.
-mesh.geometry.x[:, 1] *= 4.
+    # Shift and scale the mesh
+    mesh.geometry.x[:, 0] -= 0.5
+    mesh.geometry.x[:, 1] -= 0.5
+    mesh.geometry.x[:, 0] *= 1.5
+    mesh.geometry.x[:, 1] *= 1.5
+
+    with XDMFFile(mesh.comm, "./square.xdmf", "w") as of:
+        of.write_mesh(mesh)
+else:
+    with XDMFFile(MPI.COMM_WORLD, "./square.xdmf", "r") as fi:
+        mesh = fi.read_mesh()
 
 results = {"dofs": [], "H10 error": [], "L2 error": []}
 for i in range(max_it):
