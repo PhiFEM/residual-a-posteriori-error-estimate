@@ -1,6 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 import pandas as pd
+
+parent_dir = os.path.dirname(__file__)
+output_dir = os.path.join(parent_dir, "output")
 
 def plot(df):
     dofs = df["dofs"].values
@@ -17,8 +21,8 @@ def plot(df):
 
 plt.figure()
 
-df = pd.read_csv("./output/results.csv")
+df = pd.read_csv(os.path.join(output_dir, "results.csv"))
 plot(df)
 
 plt.legend()
-plt.savefig(f"plot.pdf", bbox_inches="tight")
+plt.savefig(os.path.join(output_dir, "plot.pdf"), bbox_inches="tight")

@@ -1,6 +1,4 @@
 import jax
-import jax.numpy as jnp
-import numpy as np
 
 def negative_laplacian(func):
     """Compute the negative laplacian of a (numpy) function of two or three arguments.

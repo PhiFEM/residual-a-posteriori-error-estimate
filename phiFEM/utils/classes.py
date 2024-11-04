@@ -1,19 +1,20 @@
 from basix.ufl import element
+import collections
 import dolfinx as dfx
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
 from dolfinx.io import XDMFFile
-from mpi4py import MPI
 import numpy as np
 import os
 import pandas as pd
 import ufl
-from ufl import inner, dot, jump, grad, div, avg
+from ufl import inner, jump, grad, div, avg
 
 from utils.derivatives import negative_laplacian, compute_gradient
 from utils.compute_meshtags import tag_entities
 from utils.mesh_scripts import plot_mesh_tags, compute_outward_normal
 
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
+
 class ContinuousFunction:
     def __init__(self, expression):
         self.expression = expression
@@ -103,13 +104,8 @@ class PhiFEMSolver:
         interior_cells = self.cells_tags.indices[np.where(self.cells_tags.values == 1)]
         cut_cells      = self.cells_tags.indices[np.where(self.cells_tags.values == 2)]
         Omega_h_cells = np.union1d(interior_cells, cut_cells)
-        # Omega_h_cells = self.cells_tags.indices[np.where(self.cells_tags.values == 1)]
         # We do not need the dofs here since cells and DG0 dofs share the same indices in dolfinx
         v0.x.array[Omega_h_cells] = 1.
-
-        with dfx.io.XDMFFile(mesh.comm, f"output/v0_{str(self.i).zfill(2)}.xdmf", "w") as of:
-            of.write_mesh(mesh)
-            of.write_function(v0)
 
         h = ufl.CellDiameter(mesh)
         n = ufl.FacetNormal(mesh)
@@ -118,16 +114,7 @@ class PhiFEMSolver:
         v = ufl.TestFunction(FE_space)
 
         Omega_h_n = self._compute_normal(mesh)
-        # Omega_h_n = grad(phi_disc) / (ufl.sqrt(inner(grad(phi_disc), grad(phi_disc))))
-        DG0VecElement = element("DG", mesh.topology.cell_name(), 0, shape=(mesh.topology.dim,))
-        W0 = dfx.fem.functionspace(mesh, DG0VecElement)
-        w0 = dfx.fem.Function(W0)
-        w0.sub(0).interpolate(dfx.fem.Expression(Omega_h_n[0], W0.sub(0).element.interpolation_points()))
-        w0.sub(1).interpolate(dfx.fem.Expression(Omega_h_n[1], W0.sub(1).element.interpolation_points()))
 
-        with dfx.io.XDMFFile(mesh.comm, f"./output/Omega_h_n_{str(self.i).zfill(2)}.xdmf", "w") as of:
-            of.write_mesh(mesh)
-            of.write_function(w0)
         dx = ufl.Measure("dx",
                          domain=mesh,
                          subdomain_data=self.cells_tags,
@@ -169,17 +156,19 @@ class PhiFEMSolver:
 
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)
+
         return v0
     
-    def assembly(self):
+    def assemble(self):
         self.A = assemble_matrix(self.bilinear_form)
         self.A.assemble()
         self.b = assemble_vector(self.linear_form)
-    
+
     def solve(self, wh):
         self.petsc_solver.setOperators(self.A)
         self.petsc_solver.solve(self.b, wh.vector)
     
+
 class ResultsSaver:
     def __init__(self, output_path, data_keys):
         self.output_path = output_path
@@ -188,6 +177,11 @@ class ResultsSaver:
         if not os.path.isdir(output_path):
 	        print(f"{output_path} directory not found, we create it.")
 	        os.mkdir(os.path.join(".", output_path))
+
+        output_functions_path = os.path.join(output_path, "functions/")
+        if not os.path.isdir(output_functions_path):
+	        print(f"{output_functions_path} directory not found, we create it.")
+	        os.mkdir(output_functions_path)
         
     def save_values(self, values, prnt=False):
         for key, val in zip(self.results.keys(), values):
@@ -200,6 +194,6 @@ class ResultsSaver:
     
     def save_function(self, function, file_name):
         mesh = function.function_space.mesh
-        with XDMFFile(mesh.comm, os.path.join(self.output_path, file_name + ".xdmf"), "w") as of:
+        with XDMFFile(mesh.comm, os.path.join(self.output_path, "functions",  file_name + ".xdmf"), "w") as of:
             of.write_mesh(mesh)
             of.write_function(function)
