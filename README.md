@@ -1,22 +1,35 @@
 # Phi-FEM with FEniCSx
 
+A phi-FEM implementation for Poisson-Dirichlet problems.
+
+## Prerequisites
+
+- docker/podman
+
 The docker image is based on FEniCSx.
 It contains also some python libraries dependencies.
 
-To build the image:
+## Build the image:
+Replace `YOUR_ENGINE_HERE` by `docker`, `podman` or your favorite container engine.
 ```bash
-docker login
+export CONTAINER_ENGINE="YOUR_ENGINE_HERE"
+${CONTAINER_ENGINE} login
 cd docker/
-sudo bash build_image.sh
+sudo -E bash build_image.sh
 ```
 
-To launch the image (from the root directory):
+## Launch the image (from the root directory):
 ```bash
-sudo bash run_image.sh
+sudo -E bash run_image.sh
 ```
 
-<!--- Run an example (from the root directory):
+## Run an example (inside the container from the root directory):
 ```bash
-cd Poisson-Dirichlet
-python3 phiFEM_test_case1.py
-``` --->
+cd phiFEM/homogeneous_dirichlet/
+python3 main.py
+```
+
+## Launch unit tests (inside the container from the root directory):
+```bash
+pytest
+```

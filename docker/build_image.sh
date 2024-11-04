@@ -1,4 +1,2 @@
 #!/bin/bash
-podman build --no-cache -t rbulle/phifemx .
-
-
+${CONTAINER_ENGINE} build --no-cache -t rbulle/phifemx .

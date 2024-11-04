@@ -180,7 +180,7 @@ for i in range(max_it):
         of.write_mesh(mesh)
         of.write_function(extV)
 
-    if i < max_it:
+    if i < max_it - 1:
         facets_tags = phiFEM_solver.facets_tags
         facets_to_refine = compute_facets_to_refine(mesh, facets_tags)
         print(f"Iteration n° {str(i).zfill(2)}: Mesh refinement.")
