@@ -1,7 +1,11 @@
 from basix.ufl import element
 import dolfinx as dfx
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
+from dolfinx.io import XDMFFile
+from mpi4py import MPI
 import numpy as np
+import os
+import pandas as pd
 import ufl
 from ufl import inner, dot, jump, grad, div, avg
 
@@ -175,3 +179,27 @@ class PhiFEMSolver:
     def solve(self, wh):
         self.petsc_solver.setOperators(self.A)
         self.petsc_solver.solve(self.b, wh.vector)
+    
+class ResultsSaver:
+    def __init__(self, output_path, data_keys):
+        self.output_path = output_path
+        self.results = {key: [] for key in data_keys}
+
+        if not os.path.isdir(output_path):
+	        print(f"{output_path} directory not found, we create it.")
+	        os.mkdir(os.path.join(".", output_path))
+        
+    def save_values(self, values, prnt=False):
+        for key, val in zip(self.results.keys(), values):
+            self.results[key].append(val)
+        
+        self.dataframe = pd.DataFrame(self.results)
+        self.dataframe.to_csv(os.path.join(self.output_path, "results.csv"))
+        if prnt:
+            print(self.dataframe)
+    
+    def save_function(self, function, file_name):
+        mesh = function.function_space.mesh
+        with XDMFFile(mesh.comm, os.path.join(self.output_path, file_name + ".xdmf"), "w") as of:
+            of.write_mesh(mesh)
+            of.write_function(function)

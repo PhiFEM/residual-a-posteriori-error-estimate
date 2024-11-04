@@ -8,18 +8,17 @@ import jax.numpy as jnp
 from mpi4py import MPI
 import numpy as np
 import os
-import pandas as pd
 from petsc4py import PETSc
 import ufl
 from ufl import inner, jump, grad, div, avg
 
 from utils.compute_meshtags import tag_entities
-from utils.classes import Levelset, ExactSolution, PhiFEMSolver
+from utils.classes import Levelset, ExactSolution, PhiFEMSolver, ResultsSaver
 from utils.mesh_scripts import compute_facets_to_refine
 
 parent_dir = os.path.dirname(__file__)
+output_dir = os.path.join(parent_dir, "output")
 
-output_dir = "output"
 N = 20
 max_it = 7
 quadrature_degree = 4
@@ -44,10 +43,6 @@ phi = Levelset(expression_levelset)
 u_exact = ExactSolution(expression_u_exact)
 f = u_exact.negative_laplacian()
 
-if not os.path.isdir(output_dir):
-	print(f"{output_dir} directory not found, we create it.")
-	os.mkdir(os.path.join(".", output_dir))
-
 """
 Read mesh
 """
@@ -70,7 +65,9 @@ else:
     with XDMFFile(MPI.COMM_WORLD, "./square.xdmf", "r") as fi:
         mesh = fi.read_mesh()
 
-results = {"dofs": [], "H10 error": [], "L2 error": []}
+data = ["dofs", "H10 error", "L2 error"]
+results_saver = ResultsSaver(output_dir, data)
+
 for i in range(max_it):
     print(f"Iteration n° {str(i).zfill(2)}: Creation FE space and data interpolation")
     CG1Element = element("CG", mesh.topology.cell_name(), 1)
@@ -83,7 +80,7 @@ for i in range(max_it):
     extV.interpolate(phi.exterior(0.))
 
     # TODO: change the way dofs are counted
-    results["dofs"].append(sum(np.where(phiV.x.array < 0., 1, 0)))
+    num_dofs = sum(np.where(phiV.x.array < 0., 1, 0))
     fV = dfx.fem.Function(V)
     fV.interpolate(f)
 
@@ -135,10 +132,10 @@ for i in range(max_it):
 
     H10_norm = inner(grad(e_V2), grad(e_V2)) * v0 * dx2(1) + inner(grad(e_V2), grad(e_V2)) * v0 * dx2(2)
     H10_form = dfx.fem.form(H10_norm)
-    results["H10 error"].append(np.sqrt(assemble_scalar(H10_form)))
+    h10_error = np.sqrt(assemble_scalar(H10_form))
     L2_norm = inner(e_V2, e_V2) * v0 * dx2(1) + inner(e_V2, e_V2) * v0 * dx2(2)
     L2_form = dfx.fem.form(L2_norm)
-    results["L2 error"].append(np.sqrt(assemble_scalar(L2_form)))
+    l2_error = np.sqrt(assemble_scalar(L2_form))
 
     DG0Element = element("DG", mesh.topology.cell_name(), 0)
     V0 = dfx.fem.functionspace(mesh, DG0Element)
@@ -150,35 +147,17 @@ for i in range(max_it):
     L2_norm_local = inner(inner(e_V2, e_V2), w0) * v0 * dx2(1) + inner(inner(e_V2, e_V2), w0) * v0 * dx2(2)
     L2_norm_local_form = dfx.fem.form(L2_norm_local)
     L2_error_0.x.array[:] = assemble_vector(L2_norm_local_form).array
-    with XDMFFile(mesh.comm, f"output/L2_error_{str(i).zfill(2)}.xdmf", "w") as of:
-        of.write_mesh(mesh)
-        of.write_function(L2_error_0)
 
     H10_norm_local = inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(1) + inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(2)
     H10_norm_local_form = dfx.fem.form(H10_norm_local)
     H10_error_0.x.array[:] = assemble_vector(H10_norm_local_form).array
-    with XDMFFile(mesh.comm, f"output/H10_error_{str(i).zfill(2)}.xdmf", "w") as of:
-        of.write_mesh(mesh)
-        of.write_function(H10_error_0)
 
-    df = pd.DataFrame(results)
-    print(df)
-    df.to_csv("./output/results.csv")
-    with XDMFFile(mesh.comm, f"output/uh_{str(i).zfill(2)}.xdmf", "w") as of:
-        of.write_mesh(mesh)
-        of.write_function(uh)
-
-    with XDMFFile(mesh.comm, f"output/u_exact_V_{str(i).zfill(2)}.xdmf", "w") as of:
-        of.write_mesh(mesh)
-        of.write_function(u_exact_V)
-
-    with XDMFFile(mesh.comm, f"output/phi_V_{str(i).zfill(2)}.xdmf", "w") as of:
-        of.write_mesh(mesh)
-        of.write_function(phiV)
-
-    with XDMFFile(mesh.comm, f"output/exterior_{str(i).zfill(2)}.xdmf", "w") as of:
-        of.write_mesh(mesh)
-        of.write_function(extV)
+    # Save results
+    results_saver.save_function(L2_error_0,  f"L2_error_{str(i).zfill(2)}")
+    results_saver.save_function(H10_error_0, f"H10_error_{str(i).zfill(2)}")
+    results_saver.save_function(u_exact_V,   f"u_exact_V_{str(i).zfill(2)}")
+    results_saver.save_function(phiV,        f"phi_V_{str(i).zfill(2)}")
+    results_saver.save_values([num_dofs, h10_error, l2_error], prnt=True)
 
     if i < max_it - 1:
         facets_tags = phiFEM_solver.facets_tags
