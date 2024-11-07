@@ -1,5 +1,6 @@
 from main import poisson_dirichlet
-import cProfile, pstats
+import cProfile
+import pstats
 
 if __name__=="__main__":
     profiler = cProfile.Profile()

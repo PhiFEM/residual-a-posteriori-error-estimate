@@ -1,6 +1,4 @@
-import basix as bx
-import dolfinx as dfx
-from dolfinx.io import XDMFFile, gmshio
+from dolfinx.io import XDMFFile
 from mpi4py import MPI
 import numpy as np
 import pytest

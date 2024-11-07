@@ -1,22 +1,15 @@
-import basix as bx
 import dolfinx as dfx
-from dolfinx.io import XDMFFile, gmshio
-import dolfinx.plot as plot
-from dolfinx.mesh import compute_midpoints
-import matplotlib.pyplot as plt
+from dolfinx.io import XDMFFile
 from mpi4py import MPI
 import meshio
 import numpy as np
 import pygmsh as pg
 import pytest
 import os
-import ufl
 
 from utils.compute_meshtags import tag_entities
 from utils.classes import Levelset
-from utils.mesh_scripts import (msh2xdmf_conversion_2D,
-                                plot_mesh_tags,
-                                reshape_facets_map,
+from utils.mesh_scripts import (reshape_facets_map,
                                 compute_outward_normal)
 
 parent_dir = os.path.dirname(__file__)
@@ -67,7 +60,6 @@ def test_outward_normal(data_name, mesh_name, levelset):
         print(f"{mesh_path} not found, we create it.")
         create_mesh(mesh_path, 0.1)
     
-    gdim = 2
     with XDMFFile(MPI.COMM_WORLD, os.path.join(parent_dir, "tests_data", "disk.xdmf"), "r") as fi:
         mesh = fi.read_mesh(name="Grid")
     
@@ -85,7 +77,6 @@ def test_outward_normal(data_name, mesh_name, levelset):
 
     f2v_map = np.reshape(f2v_connect.array, (-1, 2))
 
-    num_facets = mesh.topology.index_map(fdim).size_global
     points = mesh.geometry.x
 
     f2c_connect = mesh.topology.connectivity(fdim, cdim)
@@ -93,7 +84,6 @@ def test_outward_normal(data_name, mesh_name, levelset):
     mask = np.where(facets_tags.values == 4)
     f2c_map[mask]
 
-    inner_prods = []
     for facet in facets_tags.indices[mask]:
         neighbor_inside_cell = np.intersect1d(f2c_map[facet], cells_tags.indices[np.where(cells_tags.values == 2)])
         dof_0 = dfx.fem.locate_dofs_topological(W0.sub(0), cdim, neighbor_inside_cell)
