@@ -16,8 +16,6 @@ import ufl
 from ufl import inner, grad
 
 def compute_outward_normal(mesh, mesh_tags, levelset):
-    cells_tags = mesh_tags[0]
-    facets_tags = mesh_tags[1]
     # This function is used to define the unit outward pointing normal to Gamma_h
     CG1Element = element("CG", mesh.topology.cell_name(), 1)
     V = dfx.fem.functionspace(mesh, CG1Element)
@@ -110,7 +108,6 @@ def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False):
             topology_index: geometry_index for c in range(num_cells) for (topology_index, geometry_index) in zip(
                 connectivity_cells_to_vertices.links(c), mesh.geometry.dofmap[c])
         }
-        linestyles = "solid"
         lines = list()
         lines_colors_as_int = list()
         lines_colors_as_str = list()
@@ -152,7 +149,6 @@ def compute_facets_to_refine(mesh, facets_tags):
     c2f_connect = mesh.topology.connectivity(cdim, fdim)
 
     num_facets_per_cell = len(c2f_connect.links(0))
-    num_cells_per_facet = len(f2c_connect.links(Gamma_h_facets[0]))
 
     c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
     f2c_map = reshape_facets_map(f2c_connect)
