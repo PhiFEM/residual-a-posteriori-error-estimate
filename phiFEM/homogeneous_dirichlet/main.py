@@ -11,6 +11,7 @@ import ufl
 from ufl import inner, grad
 from utils.classes import Levelset, ExactSolution, PhiFEMSolver, ResultsSaver
 from utils.mesh_scripts import compute_facets_to_refine
+from utils.estimation import estimate_residual, marking
 
 def cprint(str2print, print_save=True, file=None):
     if print_save:
@@ -20,10 +21,18 @@ def poisson_dirichlet(N,
                       max_it,
                       quadrature_degree=4,
                       sigma_D=1.,
-                      print_save=False):
+                      print_save=False,
+                      ref_method="background",
+                      compute_submesh=False):
     parent_dir = os.path.dirname(__file__)
-    output_dir = os.path.join(parent_dir, "output")
+    if compute_submesh:
+        output_dir = os.path.join(parent_dir, "output", "submesh", ref_method)
+    else:
+        output_dir = os.path.join(parent_dir, "output", "bg_mesh", ref_method)
 
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
+    
     tilt_angle = np.pi/6.
 
     def rotation(angle, x):
@@ -33,11 +42,9 @@ def poisson_dirichlet(N,
 
     # Defines a tilted square
     def expression_levelset(x, y):
-        fct = lambda x, y: jnp.exp(-1./(jnp.abs(rotation(tilt_angle - jnp.pi/4., [x, y])[0])+jnp.abs(rotation(tilt_angle - jnp.pi/4., [x, y])[1])))
-
-        shift = fct(np.cos(tilt_angle)/2., np.sin(tilt_angle)/2.)
-
-        return fct(x, y) - shift
+        def fct(x, y):
+            return jnp.sum(jnp.abs(rotation(tilt_angle - jnp.pi/4., [x, y])), axis=0)
+        return fct(x, y) - np.sqrt(2.)/2.
 
     def expression_u_exact(x, y):
         return jnp.sin(2. * jnp.pi * rotation(tilt_angle, [x, y])[0]) * jnp.sin(2. * jnp.pi * rotation(tilt_angle, [x, y])[1])
@@ -54,42 +61,28 @@ def poisson_dirichlet(N,
 
     if (not os.path.isfile(mesh_path_h5)) or (not os.path.isfile(mesh_path_xdmf)):
         cprint(f"{mesh_path_h5} or {mesh_path_xdmf} not found, we create them.", print_save)
-        mesh = dfx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
+        bg_mesh = dfx.mesh.create_unit_square(MPI.COMM_WORLD, N, N)
 
         # Shift and scale the mesh
-        mesh.geometry.x[:, 0] -= 0.5
-        mesh.geometry.x[:, 1] -= 0.5
-        mesh.geometry.x[:, 0] *= 1.5
-        mesh.geometry.x[:, 1] *= 1.5
+        bg_mesh.geometry.x[:, 0] -= 0.5
+        bg_mesh.geometry.x[:, 1] -= 0.5
+        bg_mesh.geometry.x[:, 0] *= 2.
+        bg_mesh.geometry.x[:, 1] *= 2.
 
-        with XDMFFile(mesh.comm, "./square.xdmf", "w") as of:
-            of.write_mesh(mesh)
+        with XDMFFile(bg_mesh.comm, "./square.xdmf", "w") as of:
+            of.write_mesh(bg_mesh)
     else:
         with XDMFFile(MPI.COMM_WORLD, "./square.xdmf", "r") as fi:
-            mesh = fi.read_mesh()
+            bg_mesh = fi.read_mesh()
 
-    data = ["dofs", "H10 error", "L2 error"]
+    data = ["dofs", "H10 error", "L2 error", "H10 estimator"]
     if print_save:
         results_saver = ResultsSaver(output_dir, data)
 
+    working_mesh = bg_mesh
     for i in range(max_it):
-        cprint(f"Iteration n° {str(i).zfill(2)}: Creation FE space and data interpolation", print_save)
-        CG1Element = element("CG", mesh.topology.cell_name(), 1)
-        CG2Element = element("CG", mesh.topology.cell_name(), 2)
-        V = dfx.fem.functionspace(mesh, CG1Element)
-        Vf = dfx.fem.functionspace(mesh, CG2Element)
-        phiV = dfx.fem.Function(V)
-        phiV.interpolate(phi.dolfinx_call)
-        extV = dfx.fem.Function(V)
-        extV.interpolate(phi.exterior(0.))
-
-        # TODO: change the way dofs are counted
-        num_dofs = sum(np.where(phiV.x.array < 0., 1, 0))
-        fV = dfx.fem.Function(V)
-        fV.interpolate(f)
-
-        wh = dfx.fem.Function(V)
-        wh.vector.set(0.0)
+        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Creation FE space and data interpolation", print_save)
+        CG1Element = element("CG", working_mesh.topology.cell_name(), 1)
 
         # Parametrization of the PETSc solver
         options = PETSc.Options()
@@ -97,31 +90,40 @@ def poisson_dirichlet(N,
         options["pc_type"] = "hypre"
         options["ksp_rtol"] = 1e-7
         options["pc_hypre_type"] = "boomeramg"
-        petsc_solver = PETSc.KSP().create(mesh.comm)
+        petsc_solver = PETSc.KSP().create(working_mesh.comm)
         petsc_solver.setFromOptions()
 
-        phiFEM_solver = PhiFEMSolver(petsc_solver, i)
-        cprint(f"Iteration n° {str(i).zfill(2)}: Data interpolation.", print_save)
-        phiFEM_solver.set_data(fV, phi)
-        cprint(f"Iteration n° {str(i).zfill(2)}: Mesh tags computation.", print_save)
-        phiFEM_solver.compute_tags(mesh)
-        cprint(f"Iteration n° {str(i).zfill(2)}: Variational formulation set up.", print_save)
-        v0 = phiFEM_solver.set_variational_formulation(V)
-        cprint(f"Iteration n° {str(i).zfill(2)}: Linear system assembly.", print_save)
+        phiFEM_solver = PhiFEMSolver(working_mesh, CG1Element, petsc_solver, num_step=i)
+        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Data interpolation.", print_save)
+        phiFEM_solver.set_data(f, phi)
+        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh tags computation.", print_save)
+        phiFEM_solver.compute_tags(create_submesh=compute_submesh)
+        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Variational formulation set up.", print_save)
+        v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
+        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Linear system assembly.", print_save)
         phiFEM_solver.assemble()
-        cprint(f"Iteration n° {str(i).zfill(2)}: Solve.", print_save)
-        phiFEM_solver.solve(wh)
+        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Solve.", print_save)
+        phiFEM_solver.solve()
 
-        uh = dfx.fem.Function(V)
-        uh.x.array[:] = wh.x.array * phiV.x.array
+        if compute_submesh:
+            uh = phiFEM_solver.compute_submesh_solution()
+            working_mesh = phiFEM_solver.submesh
+            working_cells_tags = phiFEM_solver.submesh_cells_tags
+        else:
+            uh = phiFEM_solver.compute_bg_mesh_solution()
+            working_mesh = phiFEM_solver.bg_mesh
+            working_cells_tags = phiFEM_solver.bg_mesh_cells_tags
 
-        cprint(f"Iteration n° {str(i).zfill(2)}: Ouput save and error computation.", print_save)
-        u_exact_V = dfx.fem.Function(V)
-        u_exact_V.interpolate(u_exact.dolfinx_call)
+        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Ouput save and error computation.", print_save)
+        
+        CG2Element = element("CG", working_mesh.topology.cell_name(), 2)
+        V = dfx.fem.functionspace(working_mesh, CG1Element)
+        V2 = dfx.fem.functionspace(working_mesh, CG2Element)
 
-        CG2Element = element("CG", mesh.topology.cell_name(), 2)
-        V2 = dfx.fem.functionspace(mesh, CG2Element)
-
+        phiV = phi.interpolated
+        fV = f.interpolated
+        u_exact.interpolate(V)
+        u_exact_V = u_exact.interpolated
         u_exact_V2 = dfx.fem.Function(V2)
         u_exact_V2.interpolate(u_exact.dolfinx_call)
         uh_V2 = dfx.fem.Function(V2)
@@ -130,51 +132,94 @@ def poisson_dirichlet(N,
         e_V2.x.array[:] = u_exact_V2.x.array - uh_V2.x.array
 
         dx2 = ufl.Measure("dx",
-                        domain=mesh,
-                        subdomain_data=phiFEM_solver.cells_tags,
-                        metadata={"quadrature_degree": 6})
+                          domain=working_mesh,
+                          subdomain_data=working_cells_tags,
+                          metadata={"quadrature_degree": 6})
 
-        H10_norm = inner(grad(e_V2), grad(e_V2)) * v0 * dx2(1) + inner(grad(e_V2), grad(e_V2)) * v0 * dx2(2)
-        H10_form = dfx.fem.form(H10_norm)
-        h10_error = np.sqrt(assemble_scalar(H10_form))
-        L2_norm = inner(e_V2, e_V2) * v0 * dx2(1) + inner(e_V2, e_V2) * v0 * dx2(2)
-        L2_form = dfx.fem.form(L2_norm)
-        l2_error = np.sqrt(assemble_scalar(L2_form))
-
-        DG0Element = element("DG", mesh.topology.cell_name(), 0)
-        V0 = dfx.fem.functionspace(mesh, DG0Element)
-
+        DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
+        V0 = dfx.fem.functionspace(working_mesh, DG0Element)
         w0 = ufl.TrialFunction(V0)
+        if phiFEM_solver.submesh is None:
+            L2_norm_local = inner(inner(e_V2, e_V2), w0) * v0 * dx2(1) + inner(inner(e_V2, e_V2), w0) * v0 * dx2(2)
+            H10_norm_local = inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(1) + inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(2)
+        else:
+            L2_norm_local = inner(inner(e_V2, e_V2), w0) * dx2(1) + inner(inner(e_V2, e_V2), w0) * dx2(2)
+            H10_norm_local = inner(inner(grad(e_V2), grad(e_V2)), w0) * dx2(1) + inner(inner(grad(e_V2), grad(e_V2)), w0) * dx2(2)
+
         L2_error_0 = dfx.fem.Function(V0)
         H10_error_0 = dfx.fem.Function(V0)
 
-        L2_norm_local = inner(inner(e_V2, e_V2), w0) * v0 * dx2(1) + inner(inner(e_V2, e_V2), w0) * v0 * dx2(2)
         L2_norm_local_form = dfx.fem.form(L2_norm_local)
         L2_error_0.x.array[:] = assemble_vector(L2_norm_local_form).array
+        L2_error_global = np.sqrt(sum(L2_error_0.x.array[:]))
 
-        H10_norm_local = inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(1) + inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(2)
         H10_norm_local_form = dfx.fem.form(H10_norm_local)
         H10_error_0.x.array[:] = assemble_vector(H10_norm_local_form).array
+        H10_error_global = np.sqrt(sum(H10_error_0.x.array[:]))
+
+        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: a posteriori error estimation.", print_save)
+        eta_h = estimate_residual(fV, phiFEM_solver, V0=V0)
+        h10_est = np.sqrt(sum(eta_h.x.array[:]))
 
         # Save results
         if print_save:
             results_saver.save_function(L2_error_0,  f"L2_error_{str(i).zfill(2)}")
             results_saver.save_function(H10_error_0, f"H10_error_{str(i).zfill(2)}")
             results_saver.save_function(u_exact_V,   f"u_exact_V_{str(i).zfill(2)}")
+            results_saver.save_function(eta_h,       f"eta_h_{str(i).zfill(2)}")
             results_saver.save_function(phiV,        f"phi_V_{str(i).zfill(2)}")
-            results_saver.save_values([num_dofs, h10_error, l2_error], prnt=True)
+            if not compute_submesh:
+                results_saver.save_function(v0,      f"v0_{str(i).zfill(2)}")
+            results_saver.save_function(uh,          f"uh_{str(i).zfill(2)}")
+            results_saver.save_values([num_dofs,
+                                       H10_error_global,
+                                       L2_error_global,
+                                       h10_est],
+                                       prnt=True)
 
+        # Marking
         if i < max_it - 1:
+            cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh refinement.", print_save)
             facets_tags = phiFEM_solver.facets_tags
-            facets_to_refine = compute_facets_to_refine(mesh, facets_tags)
-            cprint(f"Iteration n° {str(i).zfill(2)}: Mesh refinement.", print_save)
-            mesh = dfx.mesh.refine(mesh, facets_to_refine)
-            # mesh = dfx.mesh.refine(mesh)
+
+            # Uniform refinement (Omega_h only)
+            if ref_method == "omega_h":
+                if compute_submesh:
+                    working_mesh = dfx.mesh.refine(working_mesh)
+                else:
+                    facets_to_refine = compute_facets_to_refine(working_mesh, facets_tags)
+                    working_mesh = dfx.mesh.refine(working_mesh, facets_to_refine)
+
+            # Uniform refinement (background mesh)
+            if ref_method == "background":
+                assert not compute_submesh, "Submesh has been created, we cannot refine the background mesh."
+                working_mesh = dfx.mesh.refine(working_mesh)
+
+            # Adaptive refinement
+            if ref_method == "adaptive":
+                facets2ref = marking(eta_h)
+                working_mesh = dfx.mesh.refine(working_mesh, facets2ref)
+
         cprint("\n", print_save)
-        
+
 if __name__=="__main__":
-    # Size of initial background mesh (NxN cells)
-    N = 10
-    # Maximum number of iterations in refinement loop
-    max_it = 7
-    poisson_dirichlet(N, max_it, print_save=True)
+    poisson_dirichlet(10,
+                      8,
+                      print_save=True,
+                      ref_method="omega_h",
+                      compute_submesh=False)
+    poisson_dirichlet(10,
+                      20,
+                      print_save=True,
+                      ref_method="adaptive",
+                      compute_submesh=False)
+    poisson_dirichlet(10,
+                      8,
+                      print_save=True,
+                      ref_method="omega_h",
+                      compute_submesh=True)
+    poisson_dirichlet(10,
+                      20,
+                      print_save=True,
+                      ref_method="adaptive",
+                      compute_submesh=True)

@@ -4,25 +4,39 @@ import os
 import pandas as pd
 
 parent_dir = os.path.dirname(__file__)
-output_dir = os.path.join(parent_dir, "output")
 
-def plot(df):
-    dofs = df["dofs"].values
-    h10  = df["H10 error"].values
-    l2   = df["L2 error"].values
+def plot_h10(mesh_type="bg_mesh", ref_method="background", cutoff=-4, marker="^"):
+    df = pd.read_csv(os.path.join(parent_dir, "output", mesh_type, ref_method, "results.csv"))
+    dofs    = df["dofs"].values
+    h10     = df["H10 error"].values
+    h10_est = df["H10 estimator"].values
 
-    a, b = np.polyfit(np.log(dofs[-4:]), np.log(h10[-4:]), 1)
-    c, d = np.polyfit(np.log(dofs[-4:]), np.log(l2[-4:]), 1)
+    plt.loglog(dofs, h10, "-" + marker, label=f"H10 error ({mesh_type}, {ref_method})")
+    if cutoff < 0:
+        a, b = np.polyfit(np.log(dofs[cutoff:]), np.log(h10[cutoff:]), 1)
+        plt.loglog(dofs[cutoff:], 0.8*np.exp(b)*dofs[cutoff:]**a, "--", color='black', label=f"Slope {np.round(a,2)}")
 
-    plt.loglog(dofs, h10, "-^", label=f"H10 error")
-    plt.loglog(dofs, l2, "-^", label=f"L2 error")
-    plt.loglog(dofs[-4:], 0.9*np.exp(b)*dofs[-4:]**a, "--", color='black', label=f"Slope {np.round(a,2)}")
-    plt.loglog(dofs[-4:], 0.9*np.exp(d)*dofs[-4:]**c, "--", color='black', label=f"Slope {np.round(c,2)}")
+    plt.loglog(dofs, h10_est, "--" + marker, label=f"H10 estimator ({mesh_type}, {ref_method})")
+    if cutoff < 0:
+        e, f = np.polyfit(np.log(dofs[cutoff:]), np.log(h10_est[cutoff:]), 1)
+        plt.loglog(dofs[cutoff:], 0.8*np.exp(f)*dofs[cutoff:]**e, "--", color='black', label=f"Slope {np.round(e,2)}")
 
-plt.figure()
+if __name__=="__main__":
+    plt.figure()
 
-df = pd.read_csv(os.path.join(output_dir, "results.csv"))
-plot(df)
+    plot_h10(mesh_type="bg_mesh", ref_method="omega_h", marker="o")
+    plot_h10(mesh_type="bg_mesh", ref_method="adaptive", marker="^")
 
-plt.legend()
-plt.savefig(os.path.join(output_dir, "plot.pdf"), bbox_inches="tight")
+    plt.xlabel("dofs")
+    plt.ylabel(r"$\eta$")
+    plt.legend()
+    plt.savefig(os.path.join(parent_dir, "output", "bg_mesh", "plot_adaptive.pdf"), bbox_inches="tight")
+    plt.figure()
+
+    plot_h10(mesh_type="submesh", ref_method="omega_h", marker="o")
+    plot_h10(mesh_type="submesh", ref_method="adaptive", marker="^")
+
+    plt.xlabel("dofs")
+    plt.ylabel(r"$\eta$")
+    plt.legend()
+    plt.savefig(os.path.join(parent_dir, "output", "submesh", "plot_adaptive.pdf"), bbox_inches="tight")
