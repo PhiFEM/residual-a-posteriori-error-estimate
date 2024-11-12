@@ -1,68 +1,14 @@
 from basix.ufl import element
 import dolfinx as dfx
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
-from dolfinx.io import XDMFFile
 import numpy as np
-import os
-import pandas as pd
 import ufl
 from ufl import inner, jump, grad, div, avg
 
-from utils.derivatives import negative_laplacian, compute_gradient
 from utils.compute_meshtags import tag_entities
 from utils.mesh_scripts import plot_mesh_tags, compute_outward_normal
 
 import matplotlib.pyplot as plt
-
-class ContinuousFunction:
-    def __init__(self, expression):
-        self.expression = expression
-        self.interpolated = None
-    
-    def __call__(self, x, y):
-        return self.expression(x, y)
-    
-    def dolfinx_call(self, x):
-        return self(x[0], x[1])
-    
-    def interpolate(self, FE_space):
-        self.interpolated = dfx.fem.Function(FE_space)
-        self.interpolated.interpolate(self.dolfinx_call)
-
-class Levelset(ContinuousFunction):
-    def exterior(self, t):
-        """ Compute a lambda function determining if the point x is outside the domain defined by the isoline of level t.
-        
-        Args:
-            t (float): level of the isoline.
-        
-        Return:
-            lambda function taking a tuple of coordinates and returning a boolean 
-        """
-        return lambda x: self(x[0], x[1]) > t
-    
-    def interior(self, t):
-        """ Compute a lambda function determining if the point x is inside the domain defined by the isoline of level t.
-        
-        Args:
-            t (float): level of the isoline.
-        
-        Return:
-            lambda function taking a tuple of coordinates and returning a boolean 
-        """
-        return lambda x: self(x[0], x[1]) < t
-    
-    def gradient(self):
-        def func(x, y):
-            return self.__call__(x, y) # Dirty workaround because compute_gradient looks for the number of arguments in order to determine the dimension and "self" messes up the count.
-        return compute_gradient(func)
-
-class ExactSolution(ContinuousFunction):
-    def compute_negative_laplacian(self):
-        def func(x, y):
-            return self.__call__(x, y) # Dirty workaround because negative_laplacian looks for the number of arguments in order to determine the dimension and "self" messes up the count.
-        comp_nlap = negative_laplacian(func)
-        self.nlap = ContinuousFunction(lambda x, y: comp_nlap([x, y]))
 
 # TODO: keep the connectivities as class objects to avoid unnecessary multiple computations.
 class PhiFEMSolver:
@@ -82,6 +28,7 @@ class PhiFEMSolver:
         self.facets_tags        = None
         self.rhs                = None
         self.levelset           = None
+        self.levelset_space     = None
         self.submesh_solution   = None
         self.bg_mesh_solution   = None
         self.FE_space           = None
@@ -183,14 +130,12 @@ class PhiFEMSolver:
             cells_tags = self.submesh_cells_tags
         
         self.FE_space = dfx.fem.functionspace(working_mesh, self.FE_element)
-        levelset_space = dfx.fem.functionspace(working_mesh, self.levelset_element)
+        self.levelset_space = dfx.fem.functionspace(working_mesh, self.levelset_element)
 
-        self.levelset.interpolate(levelset_space)
-        phi_h = self.levelset.interpolated
+        phi_h = self.levelset.interpolate(self.levelset_space)
         num_dofs = sum(np.where(phi_h.x.array < 0., 1, 0))
 
-        self.rhs.interpolate(self.FE_space)
-        f_h = self.rhs.interpolated
+        f_h = self.rhs.interpolate(self.FE_space)
 
         h = ufl.CellDiameter(working_mesh)
         n = ufl.FacetNormal(working_mesh)
@@ -262,7 +207,7 @@ class PhiFEMSolver:
     def compute_submesh_solution(self):
         assert self.submesh is not None, "No submesh has been created."
         # If a submesh has been created, phi_h lives on the submesh
-        phi_h = self.levelset.interpolated
+        phi_h = self.levelset.interpolate(self.FE_space)
         uh = dfx.fem.Function(self.FE_space)
         uh.x.array[:] = self.solution.x.array * phi_h.x.array
         self.submesh_solution = uh
@@ -270,44 +215,15 @@ class PhiFEMSolver:
     
     def compute_bg_mesh_solution(self):
         if self.submesh is None:
-            phi_h = self.levelset.interpolated
+            phi_h = self.levelset.interpolate(self.FE_space)
             uh_bg = dfx.fem.Function(self.FE_space)
             uh_bg.x.array[:] = self.solution.x.array * phi_h.x.array
         else:
             V_bg = dfx.fem.functionspace(self.bg_mesh, self.FE_element)
-            phi_bg = self.levelset.interpolated
+            phi_bg = self.levelset.interpolate(self.FE_space)
             solution_bg = dfx.fem.Function(V_bg)
             self.mesh2mesh_interpolation(self.solution, solution_bg)
             uh_bg = dfx.fem.Function(V_bg)
             uh_bg.x.array[:] = solution_bg.x.array * phi_bg.x.array
         self.bg_mesh_solution = uh_bg
         return uh_bg
-
-class ResultsSaver:
-    def __init__(self, output_path, data_keys):
-        self.output_path = output_path
-        self.results = {key: [] for key in data_keys}
-
-        if not os.path.isdir(output_path):
-	        print(f"{output_path} directory not found, we create it.")
-	        os.mkdir(os.path.join(".", output_path))
-
-        output_functions_path = os.path.join(output_path, "functions/")
-        if not os.path.isdir(output_functions_path):
-	        print(f"{output_functions_path} directory not found, we create it.")
-	        os.mkdir(output_functions_path)
-        
-    def save_values(self, values, prnt=False):
-        for key, val in zip(self.results.keys(), values):
-            self.results[key].append(val)
-        
-        self.dataframe = pd.DataFrame(self.results)
-        self.dataframe.to_csv(os.path.join(self.output_path, "results.csv"))
-        if prnt:
-            print(self.dataframe)
-    
-    def save_function(self, function, file_name):
-        mesh = function.function_space.mesh
-        with XDMFFile(mesh.comm, os.path.join(self.output_path, "functions",  file_name + ".xdmf"), "w") as of:
-            of.write_mesh(mesh)
-            of.write_function(function)

@@ -9,7 +9,9 @@ import os
 from petsc4py import PETSc
 import ufl
 from ufl import inner, grad
-from utils.classes import Levelset, ExactSolution, PhiFEMSolver, ResultsSaver
+from utils.solver import PhiFEMSolver
+from utils.continuous_functions import Levelset, ExactSolution
+from utils.saver import ResultsSaver
 from utils.mesh_scripts import compute_facets_to_refine
 from utils.estimation import estimate_residual, marking
 
@@ -121,12 +123,10 @@ def poisson_dirichlet(N,
         V = dfx.fem.functionspace(working_mesh, CG1Element)
         V2 = dfx.fem.functionspace(working_mesh, CG2Element)
 
-        phiV = phi.interpolated
-        fV = f.interpolated
-        u_exact.interpolate(V)
-        u_exact_V = u_exact.interpolated
-        u_exact_V2 = dfx.fem.Function(V2)
-        u_exact_V2.interpolate(u_exact.dolfinx_call)
+        phiV = phi.interpolate(V)
+        fV = f.interpolate(V)
+        u_exact_V = u_exact.interpolate(V)
+        u_exact_V2 = u_exact.interpolate(V2)
         uh_V2 = dfx.fem.Function(V2)
         uh_V2.interpolate(uh)
         e_V2 = dfx.fem.Function(V2)
@@ -205,22 +205,7 @@ def poisson_dirichlet(N,
 
 if __name__=="__main__":
     poisson_dirichlet(10,
-                      8,
-                      print_save=True,
-                      ref_method="omega_h",
-                      compute_submesh=False)
-    poisson_dirichlet(10,
-                      20,
-                      print_save=True,
-                      ref_method="adaptive",
-                      compute_submesh=False)
-    poisson_dirichlet(10,
-                      8,
-                      print_save=True,
-                      ref_method="omega_h",
-                      compute_submesh=True)
-    poisson_dirichlet(10,
-                      20,
+                      10,
                       print_save=True,
                       ref_method="adaptive",
                       compute_submesh=True)
