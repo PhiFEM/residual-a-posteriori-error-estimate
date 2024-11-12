@@ -58,11 +58,11 @@ class Levelset(ContinuousFunction):
         return compute_gradient(func)
 
 class ExactSolution(ContinuousFunction):
-    def negative_laplacian(self):
+    def compute_negative_laplacian(self):
         def func(x, y):
             return self.__call__(x, y) # Dirty workaround because negative_laplacian looks for the number of arguments in order to determine the dimension and "self" messes up the count.
-        nlap = ContinuousFunction(lambda x, y: negative_laplacian(func)([x, y]))
-        return nlap
+        comp_nlap = negative_laplacian(func)
+        self.nlap = ContinuousFunction(lambda x, y: comp_nlap([x, y]))
 
 # TODO: keep the connectivities as class objects to avoid unnecessary multiple computations.
 class PhiFEMSolver:
@@ -72,8 +72,9 @@ class PhiFEMSolver:
         self.bg_mesh = bg_mesh
         self.FE_element = FE_element
         if levelset_element is None:
-            levelset_element = FE_element
-        self.levelset_element = levelset_element
+            self.levelset_element = FE_element
+        else:
+            self.levelset_element = levelset_element
 
         self.submesh            = None
         self.submesh_cells_tags = None

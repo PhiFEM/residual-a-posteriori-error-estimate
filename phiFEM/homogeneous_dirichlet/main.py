@@ -1,6 +1,6 @@
 from basix.ufl import element
 import dolfinx as dfx
-from dolfinx.fem import assemble_scalar, assemble_vector
+from dolfinx.fem import assemble_vector
 from dolfinx.io import XDMFFile
 import jax.numpy as jnp
 from mpi4py import MPI
@@ -51,7 +51,8 @@ def poisson_dirichlet(N,
 
     phi = Levelset(expression_levelset)
     u_exact = ExactSolution(expression_u_exact)
-    f = u_exact.negative_laplacian()
+    u_exact.compute_negative_laplacian()
+    f = u_exact.nlap
 
     """
     Read mesh
