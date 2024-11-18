@@ -67,7 +67,9 @@ def poisson_dirichlet(N,
         return vertical_leg
     
     def expression_rhs(x, y):
-        return np.ones_like(x)
+        z = np.zeros_like(x)
+        z[np.where(expression_levelset(x, y) < 0.)] = 1.
+        return z
 
     phi = Levelset(expression_levelset)
     f = ContinuousFunction(expression_rhs)

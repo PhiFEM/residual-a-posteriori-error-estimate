@@ -4,7 +4,7 @@ import numpy as np
 import ufl
 from ufl import avg, div, grad, inner, jump
 
-def estimate_residual(fV, phiFEM_solver, V0=None, quadrature_degree=None):
+def estimate_residual(fV, phiFEM_solver, V0=None, quadrature_degree=None, boundary_term=False):
     if phiFEM_solver.submesh is not None:
         uh = phiFEM_solver.submesh_solution
         working_cells_tags = phiFEM_solver.submesh_cells_tags
@@ -27,6 +27,9 @@ def estimate_residual(fV, phiFEM_solver, V0=None, quadrature_degree=None):
                      domain=working_mesh,
                      subdomain_data=phiFEM_solver.facets_tags,
                      metadata={"quadrature_degree": quadrature_degree_facets})
+    ds = ufl.Measure("ds",
+                     domain=working_mesh,
+                     metadata={"quadrature_degree": quadrature_degree_facets})
 
     n   = ufl.FacetNormal(working_mesh)
     h_T = ufl.CellDiameter(working_mesh)
@@ -46,7 +49,13 @@ def estimate_residual(fV, phiFEM_solver, V0=None, quadrature_degree=None):
 
     # Facets residual
     eta_E = avg(h_E) * inner(inner(J_h, J_h), avg(v0)) * (dS(1) + dS(2))
+
     eta = eta_T + eta_E
+
+    if boundary_term:
+        eta_boundary = h_E * inner(inner(grad(uh), n), inner(grad(uh), n)) * v0 * ds
+        eta += eta_boundary
+    
     eta_form = dfx.fem.form(eta)
 
     eta_vec = dfx.fem.petsc.assemble_vector(eta_form)

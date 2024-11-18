@@ -22,27 +22,29 @@ class ContinuousFunction:
         return self.interpolations[element]
             
 class Levelset(ContinuousFunction):
-    def exterior(self, t):
+    def exterior(self, t, padding=0.):
         """ Compute a lambda function determining if the point x is outside the domain defined by the isoline of level t.
         
         Args:
             t (float): level of the isoline.
+            padding (float): padding parameter.
         
         Return:
             lambda function taking a tuple of coordinates and returning a boolean 
         """
-        return lambda x: self(x[0], x[1]) > t
+        return lambda x: self(x[0], x[1]) > t + padding
     
-    def interior(self, t):
+    def interior(self, t, padding=0.):
         """ Compute a lambda function determining if the point x is inside the domain defined by the isoline of level t.
         
         Args:
             t (float): level of the isoline.
+            padding (float): padding parameter.
         
         Return:
             lambda function taking a tuple of coordinates and returning a boolean 
         """
-        return lambda x: self(x[0], x[1]) < t
+        return lambda x: self(x[0], x[1]) < t - padding
     
     def gradient(self):
         def func(x, y):

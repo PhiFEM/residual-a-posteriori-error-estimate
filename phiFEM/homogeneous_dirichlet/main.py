@@ -100,7 +100,7 @@ def poisson_dirichlet(N,
         cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Data interpolation.", print_save)
         phiFEM_solver.set_data(f, phi)
         cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh tags computation.", print_save)
-        phiFEM_solver.compute_tags(create_submesh=compute_submesh)
+        phiFEM_solver.compute_tags(create_submesh=compute_submesh, padding=True)
         cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Variational formulation set up.", print_save)
         v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
         cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Linear system assembly.", print_save)
@@ -140,12 +140,9 @@ def poisson_dirichlet(N,
         DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
         V0 = dfx.fem.functionspace(working_mesh, DG0Element)
         w0 = ufl.TrialFunction(V0)
-        if phiFEM_solver.submesh is None:
-            L2_norm_local = inner(inner(e_V2, e_V2), w0) * v0 * dx2(1) + inner(inner(e_V2, e_V2), w0) * v0 * dx2(2)
-            H10_norm_local = inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(1) + inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(2)
-        else:
-            L2_norm_local = inner(inner(e_V2, e_V2), w0) * dx2(1) + inner(inner(e_V2, e_V2), w0) * dx2(2)
-            H10_norm_local = inner(inner(grad(e_V2), grad(e_V2)), w0) * dx2(1) + inner(inner(grad(e_V2), grad(e_V2)), w0) * dx2(2)
+
+        L2_norm_local = inner(inner(e_V2, e_V2), w0) * v0 * dx2(1) + inner(inner(e_V2, e_V2), w0) * v0 * dx2(2)
+        H10_norm_local = inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(1) + inner(inner(grad(e_V2), grad(e_V2)), w0) * v0 * dx2(2)
 
         L2_error_0 = dfx.fem.Function(V0)
         H10_error_0 = dfx.fem.Function(V0)
@@ -205,7 +202,22 @@ def poisson_dirichlet(N,
 
 if __name__=="__main__":
     poisson_dirichlet(10,
-                      10,
+                      25,
                       print_save=True,
                       ref_method="adaptive",
+                      compute_submesh=False)
+    poisson_dirichlet(10,
+                      25,
+                      print_save=True,
+                      ref_method="adaptive",
+                      compute_submesh=True)
+    poisson_dirichlet(10,
+                      7,
+                      print_save=True,
+                      ref_method="background",
+                      compute_submesh=False)
+    poisson_dirichlet(10,
+                      7,
+                      print_save=True,
+                      ref_method="background",
                       compute_submesh=True)

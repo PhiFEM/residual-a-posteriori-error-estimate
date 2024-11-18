@@ -1,6 +1,7 @@
 from basix.ufl import element
 import dolfinx as dfx
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector
+from dolfinx.io import XDMFFile
 import numpy as np
 import ufl
 from ufl import inner, jump, grad, div, avg
@@ -38,15 +39,24 @@ class PhiFEMSolver:
     
     def _transfer_cells_tags(self, cmap):
         cdim = self.submesh.topology.dim
+
         # TODO: change this line to allow parallel computing
         bg_mesh_interior = self.bg_mesh_cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 1)]
         bg_cells_omega_h_gamma = self.bg_mesh_cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 2)]
+        bg_cells_padding = self.bg_mesh_cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 4)]
+
         mask_interior = np.in1d(cmap, bg_mesh_interior)
         mask_omega_h_gamma = np.in1d(cmap, bg_cells_omega_h_gamma)
+        mask_padding = np.in1d(cmap, bg_cells_padding)
         submesh_interior = np.where(mask_interior)[0]
         submesh_cells_omega_h_gamma = np.where(mask_omega_h_gamma)[0]
-        list_cells = [submesh_interior, submesh_cells_omega_h_gamma]
-        list_markers = [np.full_like(l, i+1) for i, l in enumerate(list_cells)]
+        submesh_cells_padding = np.where(mask_padding)[0]
+        list_cells = [submesh_interior,
+                      submesh_cells_omega_h_gamma,
+                      submesh_cells_padding]
+        list_markers = [np.full_like(submesh_interior, 1),
+                        np.full_like(submesh_cells_omega_h_gamma, 2),
+                        np.full_like(submesh_cells_padding, 4)]
         cells_indices = np.hstack(list_cells).astype(np.int32)
         cells_markers = np.hstack(list_markers).astype(np.int32)
         sorted_indices = np.argsort(cells_indices)
@@ -72,15 +82,15 @@ class PhiFEMSolver:
         self.rhs = source_term
         self.levelset = levelset
     
-    def compute_tags(self, create_submesh=False, plot=False):
+    def compute_tags(self, create_submesh=False, padding=False, plot=False):
         working_mesh = self.bg_mesh
         # Tag cells of the background mesh. Used to tag the facets and/or create the submesh.
-        self.bg_mesh_cells_tags = tag_entities(self.bg_mesh, self.levelset, self.bg_mesh.topology.dim)
+        self.bg_mesh_cells_tags = tag_entities(self.bg_mesh, self.levelset, self.bg_mesh.topology.dim, padding=padding)
         working_cells_tags = self.bg_mesh_cells_tags
         # Create the submesh and transfer the cells tags from the bg mesh to the submesh.
         # Tag the facets of the submesh.
         if create_submesh:
-            omega_h_cells = self.bg_mesh_cells_tags.indices[np.where(np.logical_or(self.bg_mesh_cells_tags.values == 1, self.bg_mesh_cells_tags.values == 2))]
+            omega_h_cells = self.bg_mesh_cells_tags.indices[np.where(np.logical_or(np.logical_or(self.bg_mesh_cells_tags.values == 1, self.bg_mesh_cells_tags.values == 2), self.bg_mesh_cells_tags.values == 4))]
             self.submesh, c_map, v_map, n_map = dfx.mesh.create_submesh(self.bg_mesh, self.bg_mesh.topology.dim, omega_h_cells)
             self._transfer_cells_tags(c_map)
             working_cells_tags = self.submesh_cells_tags
@@ -108,25 +118,26 @@ class PhiFEMSolver:
         if self.submesh is None:
             working_mesh = self.bg_mesh
             cells_tags = self.bg_mesh_cells_tags
-            
-            # Set up a DG function with values 1. in Omega_h and 0. outside
-            DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
-            V0 = dfx.fem.functionspace(working_mesh, DG0Element)
-            v0 = dfx.fem.Function(V0)
-            v0.vector.set(0.)
-            interior_cells = cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 1)]
-            cut_cells      = cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 2)]
-            Omega_h_cells = np.union1d(interior_cells, cut_cells)
-            # We do not need the dofs here since cells and DG0 dofs share the same indices in dolfinx
-            v0.x.array[Omega_h_cells] = 1.
-
-            Omega_h_n = self._compute_normal(working_mesh)
         else:
             working_mesh = self.submesh
-            dpartial_omega_h = ufl.Measure("ds",
-                                           domain=working_mesh,
-                                           metadata={"quadrature_degree": quadrature_degree})
             cells_tags = self.submesh_cells_tags
+        
+        Omega_h_n = self._compute_normal(working_mesh)
+        
+        # Set up a DG function with values 1. in Omega_h and 0. outside
+        DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
+        V0 = dfx.fem.functionspace(working_mesh, DG0Element)
+        v0 = dfx.fem.Function(V0)
+        v0.vector.set(0.)
+        interior_cells = cells_tags.indices[np.where(cells_tags.values == 1)]
+        cut_cells      = cells_tags.indices[np.where(cells_tags.values == 2)]
+        Omega_h_cells = np.union1d(interior_cells, cut_cells)
+        # We do not need the dofs here since cells and DG0 dofs share the same indices in dolfinx
+        v0.x.array[Omega_h_cells] = 1.
+
+        with XDMFFile(working_mesh.comm, "output/v0.xdmf", "w") as of:
+            of.write_mesh(working_mesh)
+            of.write_function(v0)
         
         self.FE_space = dfx.fem.functionspace(working_mesh, self.FE_element)
         self.levelset_space = dfx.fem.functionspace(working_mesh, self.levelset_element)
@@ -151,18 +162,14 @@ class PhiFEMSolver:
                          subdomain_data=self.facets_tags,
                          metadata={"quadrature_degree": quadrature_degree})
         
-        if self.submesh is None:
-            dpartial_omega_h = dS(4)
+        dpartial_omega_h = dS(4)
 
         """
         Bilinear form
         """
         stiffness = inner(grad(phi_h * w), grad(phi_h * v))
-        if self.submesh is None:
-            boundary = inner(2. * avg(inner(grad(phi_h * w), Omega_h_n) * v0),
-                            2. * avg(phi_h * v * v0))
-        else:
-            boundary = inner(inner(grad(phi_h * w), n), phi_h * v)
+        boundary = inner(2. * avg(inner(grad(phi_h * w), Omega_h_n) * v0),
+                         2. * avg(phi_h * v * v0))
 
         penalization_facets = sigma * avg(h) * inner(jump(grad(phi_h * w), n),
                                                      jump(grad(phi_h * v), n))
@@ -174,10 +181,7 @@ class PhiFEMSolver:
             + penalization_facets * dS(2) \
             + penalization_cells  * dx(2)
         
-        if self.submesh is None:
-            # This term is useless (always zero, everybody hate it)
-            # but PETSc complains if I don't include it
-            a += inner(w, v) * v0 * dx(3)
+        a += inner(w, v) * v0 * (dx(3) + dx(4))
 
         """
         Linear form

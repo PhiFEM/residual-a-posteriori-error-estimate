@@ -1,9 +1,10 @@
 import dolfinx as dfx
+from dolfinx import cpp
 import numpy as np
 
 # TODO: Modify to use in parallel
 
-def _select_entities(mesh, levelset, edim):
+def _select_entities(mesh, levelset, edim, padding=False):
     """ Compute the list of entities strictly inside Omega_h and the list of entities having a non-empty intersection with Gamma_h.
 
     Args:
@@ -34,17 +35,30 @@ def _select_entities(mesh, levelset, edim):
     # List entities having a non-empty intersection with Gamma_h
     cut_entities = np.setdiff1d(interior_entities, list_interior_entities)
 
-    return list_interior_entities, cut_entities, exterior_entities
+    if padding:
+        hmax_cutcells = max(cpp.mesh.h(mesh._cpp_object, edim, cut_entities))
+        list_exterior_padding_entities = dfx.mesh.locate_entities(mesh,
+                                                                  edim,
+                                                                  levelset.exterior(0., padding=hmax_cutcells))
+        padding_interior_entities = np.setdiff1d(entities, list_exterior_padding_entities)
+        padding_entities = np.setdiff1d(padding_interior_entities, np.union1d(interior_entities, cut_entities))
+        exterior_entities = np.setdiff1d(exterior_entities, padding_entities)
+
+        return list_interior_entities, cut_entities, exterior_entities, padding_entities
+    else:
+        return list_interior_entities, cut_entities, exterior_entities
 
 def tag_entities(mesh,
                  levelset,
                  edim,
-                 cells_tags=None):
+                 cells_tags=None,
+                 padding=False):
     """ Compute the entity tags for the interior (Omega_h) and the cut (set of cells having a non empty intersection with Gamma_h).
     Tag = 1: interior strict (Omega_h \ Omega_Gamma_h)
     Tag = 2: cut (Omega_Gamma_h)
     Tag = 3: exterior (entities strictly outside Omega_h)
-    Tag = 4: Gamma_h (for facets only, edim < mesh.topology.dim)
+    Tag = 4: facets: Gamma_h
+             cells: padding cells.
 
     Args:
         mesh: the background mesh.
@@ -59,7 +73,7 @@ def tag_entities(mesh,
     # If cells_tags is not provided, we need to go through cells selection.
     cdim = mesh.topology.dim
     if cells_tags is None:
-        interior_entities, cut_fronteer_entities, exterior_entities = _select_entities(mesh, levelset, cdim)
+        interior_entities, cut_fronteer_entities, exterior_entities, padding_entities = _select_entities(mesh, levelset, cdim, padding=padding)
     else:
         interior_entities     = cells_tags.indices[np.where(cells_tags.values == 1)]
         cut_fronteer_entities = cells_tags.indices[np.where(cells_tags.values == 2)]
@@ -97,7 +111,8 @@ def tag_entities(mesh,
     elif edim == mesh.topology.dim:
         lists = [interior_entities,
                  cut_fronteer_entities,
-                 exterior_entities]
+                 exterior_entities,
+                 padding_entities]
 
     list_markers = [np.full_like(l, i+1) for i, l in enumerate(lists)]
     entities_indices = np.hstack(lists).astype(np.int32)
