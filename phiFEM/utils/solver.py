@@ -99,7 +99,6 @@ class PhiFEMSolver:
     def set_variational_formulation(self,
                                     sigma=1.,
                                     quadrature_degree=None):
-        v0 = None
 
         if quadrature_degree is None:
             quadrature_degree = 2 * (self.levelset_element.basix_element.degree + 1)

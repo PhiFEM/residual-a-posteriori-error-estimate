@@ -24,8 +24,8 @@ def plot_h10(mesh_type="bg_mesh", ref_method="background", cutoff=-4, marker="^"
 if __name__=="__main__":
     plt.figure()
 
-    plot_h10(mesh_type="bg_mesh", ref_method="omega_h", marker="o")
-    plot_h10(mesh_type="bg_mesh", ref_method="adaptive", marker="^")
+    plot_h10(mesh_type="bg_mesh", ref_method="background", marker="o")
+    plot_h10(mesh_type="bg_mesh", ref_method="adaptive", marker="^", cutoff=-10)
 
     plt.xlabel("dofs")
     plt.ylabel(r"$\eta$")
@@ -34,7 +34,7 @@ if __name__=="__main__":
     plt.figure()
 
     plot_h10(mesh_type="submesh", ref_method="omega_h", marker="o")
-    plot_h10(mesh_type="submesh", ref_method="adaptive", marker="^")
+    plot_h10(mesh_type="submesh", ref_method="adaptive", marker="^", cutoff=-10)
 
     plt.xlabel("dofs")
     plt.ylabel(r"$\eta$")

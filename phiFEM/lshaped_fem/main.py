@@ -137,7 +137,7 @@ def poisson_dirichlet(max_it,
             results_saver.save_function(uh, f"uh_{str(i).zfill(2)}")
             results_saver.save_function(eta_h, f"eta_h_{str(i).zfill(2)}")
             results_saver.save_values([num_dofs, h10_est], prnt=True)
-        
+
         # Marking
         if i < max_it - 1:
             cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh refinement.", print_save)

@@ -1,7 +1,5 @@
 #!/bin/bash
-rm output/**/*.csv
-rm output/**/*.png
-rm output/**/*.eps
-rm output/**/*.svg
-rm output/**/*.pdf
-rm -rf output/**/functions
+rm -rf output/
+mkdir output/
+mkdir output/bg_mesh
+mkdir output/submesh

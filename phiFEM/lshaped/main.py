@@ -26,8 +26,10 @@ def poisson_dirichlet(N,
     parent_dir = os.path.dirname(__file__)
     if compute_submesh:
         output_dir = os.path.join(parent_dir, "output", "submesh", ref_method)
+        mesh_type = "Submesh"
     else:
         output_dir = os.path.join(parent_dir, "output", "bg_mesh", ref_method)
+        mesh_type = "Bg mesh"
 
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
@@ -98,7 +100,7 @@ def poisson_dirichlet(N,
 
     working_mesh = bg_mesh
     for i in range(max_it):
-        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Creation FE space and data interpolation", print_save)
+        cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Creation FE space and data interpolation", print_save)
         CG1Element = element("CG", working_mesh.topology.cell_name(), 1)
 
         # Parametrization of the PETSc solver
@@ -111,15 +113,15 @@ def poisson_dirichlet(N,
         petsc_solver.setFromOptions()
 
         phiFEM_solver = PhiFEMSolver(working_mesh, CG1Element, petsc_solver, num_step=i)
-        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Data interpolation.", print_save)
+        cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Data interpolation.", print_save)
         phiFEM_solver.set_data(f, phi)
-        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh tags computation.", print_save)
-        phiFEM_solver.compute_tags(create_submesh=compute_submesh)
-        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Variational formulation set up.", print_save)
+        cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh tags computation.", print_save)
+        phiFEM_solver.compute_tags(create_submesh=compute_submesh, padding=True)
+        cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Variational formulation set up.", print_save)
         v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
-        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Linear system assembly.", print_save)
+        cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Linear system assembly.", print_save)
         phiFEM_solver.assemble()
-        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Solve.", print_save)
+        cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Solve.", print_save)
         phiFEM_solver.solve()
 
         if compute_submesh:
@@ -129,29 +131,29 @@ def poisson_dirichlet(N,
             uh = phiFEM_solver.compute_bg_mesh_solution()
             working_mesh = phiFEM_solver.bg_mesh
 
-        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Ouput save and error computation.", print_save)
+        cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Ouput save and error computation.", print_save)
         
         phiV = phi.interpolate(phiFEM_solver.levelset_space)
         fV = f.interpolate(phiFEM_solver.FE_space)
 
-        cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: a posteriori error estimation.", print_save)
+        cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: a posteriori error estimation.", print_save)
         eta_h = estimate_residual(fV, phiFEM_solver)
         h10_est = np.sqrt(sum(eta_h.x.array[:]))
 
         # Save results
         if print_save:
-            results_saver.save_function(eta_h,       f"eta_h_{str(i).zfill(2)}")
-            results_saver.save_function(phiV,        f"phi_V_{str(i).zfill(2)}")
+            results_saver.save_function(eta_h, f"eta_h_{str(i).zfill(2)}")
+            results_saver.save_function(phiV,  f"phi_V_{str(i).zfill(2)}")
             if not compute_submesh:
-                results_saver.save_function(v0,      f"v0_{str(i).zfill(2)}")
-            results_saver.save_function(uh,          f"uh_{str(i).zfill(2)}")
+                results_saver.save_function(v0, f"v0_{str(i).zfill(2)}")
+            results_saver.save_function(uh, f"uh_{str(i).zfill(2)}")
             results_saver.save_values([num_dofs,
                                        h10_est],
                                        prnt=True)
 
         # Marking
         if i < max_it - 1:
-            cprint(f"Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh refinement.", print_save)
+            cprint(f"Mesh: {mesh_type}. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh refinement.", print_save)
             facets_tags = phiFEM_solver.facets_tags
 
             # Uniform refinement (Omega_h only)
@@ -175,22 +177,22 @@ def poisson_dirichlet(N,
         cprint("\n", print_save)
 
 if __name__=="__main__":
-    # poisson_dirichlet(10,
-    #                   5,
-    #                   print_save=True,
-    #                   ref_method="omega_h",
-    #                   compute_submesh=False)
-    # poisson_dirichlet(10,
-    #                   18,
-    #                   print_save=True,
-    #                   ref_method="adaptive",
-    #                   compute_submesh=False)
-    poisson_dirichlet(50,
-                      20,
+    poisson_dirichlet(10,
+                      25,
+                      print_save=True,
+                      ref_method="adaptive",
+                      compute_submesh=False)
+    poisson_dirichlet(10,
+                      25,
                       print_save=True,
                       ref_method="adaptive",
                       compute_submesh=True)
-    poisson_dirichlet(50,
+    poisson_dirichlet(10,
+                      7,
+                      print_save=True,
+                      ref_method="omega_h",
+                      compute_submesh=False)
+    poisson_dirichlet(10,
                       7,
                       print_save=True,
                       ref_method="omega_h",

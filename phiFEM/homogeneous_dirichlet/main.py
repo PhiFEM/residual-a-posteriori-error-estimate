@@ -193,7 +193,7 @@ def poisson_dirichlet(N,
 
             # Uniform refinement (background mesh)
             if ref_method == "background":
-                assert not compute_submesh, "Submesh has been created, we cannot refine the background mesh."
+                cprint("Submesh has been created, we refine all the submesh.")
                 working_mesh = dfx.mesh.refine(working_mesh)
 
             # Adaptive refinement
