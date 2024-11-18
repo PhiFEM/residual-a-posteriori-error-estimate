@@ -8,7 +8,7 @@ import pytest
 import os
 
 from utils.compute_meshtags import tag_entities
-from utils.classes import Levelset
+from utils.continuous_functions import Levelset
 from utils.mesh_scripts import (reshape_facets_map,
                                 compute_outward_normal)
 

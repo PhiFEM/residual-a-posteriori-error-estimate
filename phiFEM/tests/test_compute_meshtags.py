@@ -3,7 +3,7 @@ from mpi4py import MPI
 import numpy as np
 import pytest
 from utils.compute_meshtags import tag_entities
-from utils.classes import Levelset
+from utils.continuous_functions import Levelset
 import os
 from test_outward_normal import create_mesh
 
