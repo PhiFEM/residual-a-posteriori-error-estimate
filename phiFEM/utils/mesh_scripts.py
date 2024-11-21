@@ -12,8 +12,49 @@ import matplotlib.tri as tri
 import meshio
 import numpy as np
 import os
+import pygmsh
 import ufl
 from ufl import inner, grad
+
+def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1., 1.]]), geom_vertices=None, output_dir=None):
+    """ Generate a 2D conforming mesh from a levelset function and saves it as an xdmf mesh.
+
+    Args:
+        lc:            characteristic length of the mesh.
+        levelset:      levelset function (as a Levelset object).
+        level:         the level of the isoline (default: 0.).
+        bbox:          bounding box of the isoline (default: np.array([[-1., 1.], [-1., 1.]])).
+        geom_vertices: specific vertices to be added to the isoline (e.g. vertices of the geometry.)
+        output_dir:    directory path where the mesh is saved. If None the mesh is not saved.
+
+    Returns:
+        The coordinates of the boundary vertices.
+    """
+
+    x = np.arange(bbox[0,0], bbox[0,1], step=lc/np.sqrt(2.), dtype=np.float64)
+    y = np.arange(bbox[1,0], bbox[1,1], step=lc/np.sqrt(2.), dtype=np.float64)
+    X, Y = np.meshgrid(x, y, indexing="ij")
+    X_flat, Y_flat = X.flatten(), Y.flatten()
+    Z_flat = levelset(X_flat, Y_flat)
+    Z = np.reshape(Z_flat, X.shape)
+
+    c = plt.contour(X, Y, Z, [level])
+    boundary_vertices = c.collections[0].get_paths()[0].vertices
+    if geom_vertices is not None:
+        boundary_vertices = np.vstack(geom_vertices)
+    
+    with pygmsh.geo.Geometry() as geom:
+        # The boundary vertices are correctly ordered by matplotlib.
+        geom.add_polygon(boundary_vertices, mesh_size=lc)
+        mesh = geom.generate_mesh(dim=2)
+
+    for cell_block in mesh.cells:
+        if cell_block.type == "triangle":
+            triangular_cells = [("triangle", cell_block.data)]
+
+    if output_dir is not None:
+        meshio.write_points_cells(os.path.join(output_dir, "conforming_mesh.xdmf"), mesh.points, triangular_cells)
+    return boundary_vertices
 
 def compute_outward_normal(mesh, mesh_tags, levelset):
     # This function is used to define the unit outward pointing normal to Gamma_h
