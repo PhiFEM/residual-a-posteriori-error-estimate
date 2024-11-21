@@ -33,6 +33,7 @@ class PhiFEMSolver:
         self.submesh_solution   = None
         self.bg_mesh_solution   = None
         self.FE_space           = None
+        self.eta_h              = None
     
     def _compute_normal(self, mesh):
         return compute_outward_normal(mesh, [self.bg_mesh_cells_tags, self.facets_tags], self.levelset)
@@ -66,6 +67,10 @@ class PhiFEMSolver:
                                                     cells_indices[sorted_indices],
                                                     cells_markers[sorted_indices])
 
+    def set_data(self, source_term, levelset):
+        self.rhs = source_term
+        self.levelset = levelset
+
     def mesh2mesh_interpolation(self, origin_mesh_fct, dest_mesh_fct):
         # scatter_forward has to do with ghost cells in parallel (see: https://fenicsproject.discourse.group/t/the-usage-of-the-functions-of-dolfinx/13214/4)
         origin_mesh_fct.x.scatter_forward()
@@ -78,23 +83,18 @@ class PhiFEMSolver:
         dest_mesh_fct.x.scatter_forward()
         return dest_mesh_fct
 
-    def set_data(self, source_term, levelset):
-        self.rhs = source_term
-        self.levelset = levelset
-    
-    def compute_tags(self, create_submesh=False, padding=False, plot=False):
+    def compute_tags(self, padding=False, plot=False):
         working_mesh = self.bg_mesh
         # Tag cells of the background mesh. Used to tag the facets and/or create the submesh.
         self.bg_mesh_cells_tags = tag_entities(self.bg_mesh, self.levelset, self.bg_mesh.topology.dim, padding=padding)
         working_cells_tags = self.bg_mesh_cells_tags
         # Create the submesh and transfer the cells tags from the bg mesh to the submesh.
         # Tag the facets of the submesh.
-        if create_submesh:
-            omega_h_cells = self.bg_mesh_cells_tags.indices[np.where(np.logical_or(np.logical_or(self.bg_mesh_cells_tags.values == 1, self.bg_mesh_cells_tags.values == 2), self.bg_mesh_cells_tags.values == 4))]
-            self.submesh, c_map, v_map, n_map = dfx.mesh.create_submesh(self.bg_mesh, self.bg_mesh.topology.dim, omega_h_cells)
-            self._transfer_cells_tags(c_map)
-            working_cells_tags = self.submesh_cells_tags
-            working_mesh = self.submesh
+        omega_h_cells = self.bg_mesh_cells_tags.indices[np.where(np.logical_or(np.logical_or(self.bg_mesh_cells_tags.values == 1, self.bg_mesh_cells_tags.values == 2), self.bg_mesh_cells_tags.values == 4))]
+        self.submesh, c_map, v_map, n_map = dfx.mesh.create_submesh(self.bg_mesh, self.bg_mesh.topology.dim, omega_h_cells)
+        self._transfer_cells_tags(c_map)
+        working_cells_tags = self.submesh_cells_tags
+        working_mesh = self.submesh
 
         self.facets_tags = tag_entities(working_mesh, self.levelset, working_mesh.topology.dim - 1, cells_tags=working_cells_tags)
 
@@ -203,30 +203,194 @@ class PhiFEMSolver:
         self.b = assemble_vector(self.linear_form)
 
     def solve(self):
+        wh = dfx.fem.Function(self.FE_space)
+        self.petsc_solver.setOperators(self.A)
+        self.petsc_solver.solve(self.b, wh.vector)
+        phi_h = self.levelset.interpolate(self.FE_space)
+        self.solution = dfx.fem.Function(self.FE_space)
+        self.solution.x.array[:] = wh.x.array * phi_h.x.array
+    
+    def estimate_residual(self, V0=None, quadrature_degree=None, boundary_term=False):
+        uh = self.solution
+        working_cells_tags = self.submesh_cells_tags
+        working_mesh = self.submesh
+
+        if quadrature_degree is None:
+            k = uh.function_space.element.basix_element.degree
+            quadrature_degree_cells  = max(0, k - 2)
+            quadrature_degree_facets = max(0, k - 1)
+        
+        dx = ufl.Measure("dx",
+                        domain=working_mesh,
+                        subdomain_data=working_cells_tags,
+                        metadata={"quadrature_degree": quadrature_degree_cells})
+        dS = ufl.Measure("dS",
+                        domain=working_mesh,
+                        subdomain_data=self.facets_tags,
+                        metadata={"quadrature_degree": quadrature_degree_facets})
+        ds = ufl.Measure("ds",
+                        domain=working_mesh,
+                        metadata={"quadrature_degree": quadrature_degree_facets})
+
+        n   = ufl.FacetNormal(working_mesh)
+        h_T = ufl.CellDiameter(working_mesh)
+        h_E = ufl.FacetArea(working_mesh)
+
+        f_h = self.rhs.interpolate(self.FE_space)
+
+        r = f_h + div(grad(uh))
+        J_h = jump(grad(uh), -n)
+
+        if V0 is None:
+            DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
+            V0 = dfx.fem.functionspace(working_mesh, DG0Element)
+
+        v0 = ufl.TestFunction(V0)
+
+        # Interior residual
+        eta_T = h_T**2 * inner(inner(r, r), v0) * (dx(1) + dx(2))
+
+        # Facets residual
+        eta_E = avg(h_E) * inner(inner(J_h, J_h), avg(v0)) * (dS(1) + dS(2))
+
+        eta = eta_T + eta_E
+
+        if boundary_term:
+            eta_boundary = h_E * inner(inner(grad(uh), n), inner(grad(uh), n)) * v0 * ds
+            eta += eta_boundary
+        
+        eta_form = dfx.fem.form(eta)
+
+        eta_vec = dfx.fem.petsc.assemble_vector(eta_form)
+        eta_h = dfx.fem.Function(V0)
+        eta_h.vector.setArray(eta_vec.array[:])
+        self.eta_h = eta_h
+    
+    def marking(self, eta_h=None, theta=0.3):
+        if eta_h is None:
+            eta_h = self.eta_h
+        mesh = eta_h.function_space.mesh
+        cdim = mesh.topology.dim
+        fdim = cdim - 1
+        assert(mesh.comm.size == 1)
+        theta = 0.3
+
+        eta_global = sum(eta_h.x.array)
+        cutoff = theta * eta_global
+
+        sorted_cells = np.argsort(eta_h.x.array)[::-1]
+        rolling_sum = 0.0
+        for j, e in enumerate(eta_h.x.array[sorted_cells]):
+            rolling_sum += e
+            if rolling_sum > cutoff:
+                breakpoint = j
+                break
+
+        refine_cells = sorted_cells[0:breakpoint + 1]
+        indices = np.array(np.sort(refine_cells), dtype=np.int32)
+        c2f_connect = mesh.topology.connectivity(cdim, fdim)
+        num_facets_per_cell = len(c2f_connect.links(0))
+        c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
+        facets_indices = np.unique(np.sort(c2f_map[indices]))
+        return facets_indices
+
+
+class FEMSolver:
+    def __init__(self, mesh, FE_element, PETSc_solver, num_step=0):
+        self.mesh          = mesh
+        self.FE_space      = dfx.fem.functionspace(mesh, FE_element)
+        self.petsc_solver  = PETSc_solver
+        self.i             = num_step
+        self.rhs           = None
+        self.bcs           = None
+        self.bilinear_form = None
+        self.linear_form   = None
+        self.A             = None
+        self.b             = None
+        self.solution      = None
+        self.eta_h         = None
+    
+    def set_data(self, source_term, bcs=None):
+        self.rhs = source_term
+        self.bcs = bcs
+    
+    def set_variational_formulation(self, quadrature_degree=None):
+        if quadrature_degree is None:
+            quadrature_degree = 2 * (self.FE_space.basix_element.degree + 1)
+        
+        f_h = self.rhs.interpolate(self.FE_space)
+
+        u = ufl.TrialFunction(self.FE_space)
+        v = ufl.TestFunction(self.FE_space)
+
+        dx = ufl.Measure("dx",
+                         domain=self.mesh,
+                         metadata={"quadrature_degree": quadrature_degree})
+        
+        """
+        Bilinear form
+        """
+        a = inner(grad(u), grad(v)) * dx
+
+        """
+        Linear form
+        """
+        L = inner(f_h, v) * dx
+
+        self.bilinear_form = dfx.fem.form(a)
+        self.linear_form = dfx.fem.form(L)
+
+    def assemble(self):
+        self.A = assemble_matrix(self.bilinear_form, bcs=self.bcs)
+        self.A.assemble()
+        self.b = assemble_vector(self.linear_form)
+        dfx.fem.apply_lifting(self.b, [self.bilinear_form], self.bcs)
+        dfx.fem.set_bc(self.b, self.bcs)
+
+    def solve(self):
         self.solution = dfx.fem.Function(self.FE_space)
         self.petsc_solver.setOperators(self.A)
         self.petsc_solver.solve(self.b, self.solution.vector)
     
-    def compute_submesh_solution(self):
-        assert self.submesh is not None, "No submesh has been created."
-        # If a submesh has been created, phi_h lives on the submesh
-        phi_h = self.levelset.interpolate(self.FE_space)
-        uh = dfx.fem.Function(self.FE_space)
-        uh.x.array[:] = self.solution.x.array * phi_h.x.array
-        self.submesh_solution = uh
-        return uh
-    
-    def compute_bg_mesh_solution(self):
-        if self.submesh is None:
-            phi_h = self.levelset.interpolate(self.FE_space)
-            uh_bg = dfx.fem.Function(self.FE_space)
-            uh_bg.x.array[:] = self.solution.x.array * phi_h.x.array
-        else:
-            V_bg = dfx.fem.functionspace(self.bg_mesh, self.FE_element)
-            phi_bg = self.levelset.interpolate(self.FE_space)
-            solution_bg = dfx.fem.Function(V_bg)
-            self.mesh2mesh_interpolation(self.solution, solution_bg)
-            uh_bg = dfx.fem.Function(V_bg)
-            uh_bg.x.array[:] = solution_bg.x.array * phi_bg.x.array
-        self.bg_mesh_solution = uh_bg
-        return uh_bg
+    def estimate_residual(self, V0=None, quadrature_degree=None):
+        if quadrature_degree is None:
+            k = self.solution.function_space.element.basix_element.degree
+            quadrature_degree_cells  = max(0, k - 2)
+            quadrature_degree_facets = max(0, k - 1)
+        
+        dx = ufl.Measure("dx",
+                         domain=self.mesh,
+                         metadata={"quadrature_degree": quadrature_degree_cells})
+        dS = ufl.Measure("dS",
+                         domain=self.mesh,
+                         metadata={"quadrature_degree": quadrature_degree_facets})
+
+        n   = ufl.FacetNormal(self.mesh)
+        h_T = ufl.CellDiameter(self.mesh)
+        h_E = ufl.FacetArea(self.mesh)
+
+        f_h = self.rhs.interpolate(self.FE_space)
+
+        r = f_h + div(grad(self.solution))
+        J_h = jump(grad(self.solution), -n)
+
+        if V0 is None:
+            DG0Element = element("DG", self.mesh.topology.cell_name(), 0)
+            V0 = dfx.fem.functionspace(self.mesh, DG0Element)
+
+        v0 = ufl.TestFunction(V0)
+
+        # Interior residual
+        eta_T = h_T**2 * inner(inner(r, r), v0) * dx
+
+        # Facets residual
+        eta_E = avg(h_E) * inner(inner(J_h, J_h), avg(v0)) * dS
+
+        eta = eta_T + eta_E
+
+        eta_form = dfx.fem.form(eta)
+
+        eta_vec = dfx.fem.petsc.assemble_vector(eta_form)
+        eta_h = dfx.fem.Function(V0)
+        eta_h.vector.setArray(eta_vec.array[:])
+        self.eta_h = eta_h

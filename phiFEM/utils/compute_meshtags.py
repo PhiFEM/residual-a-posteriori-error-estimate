@@ -35,6 +35,7 @@ def _select_entities(mesh, levelset, edim, padding=False):
     # List entities having a non-empty intersection with Gamma_h
     cut_entities = np.setdiff1d(interior_entities, list_interior_entities)
 
+    padding_entities = []
     if padding:
         hmax_cutcells = max(cpp.mesh.h(mesh._cpp_object, edim, cut_entities))
         list_exterior_padding_entities = dfx.mesh.locate_entities(mesh,
@@ -44,9 +45,7 @@ def _select_entities(mesh, levelset, edim, padding=False):
         padding_entities = np.setdiff1d(padding_interior_entities, np.union1d(interior_entities, cut_entities))
         exterior_entities = np.setdiff1d(exterior_entities, padding_entities)
 
-        return list_interior_entities, cut_entities, exterior_entities, padding_entities
-    else:
-        return list_interior_entities, cut_entities, exterior_entities
+    return list_interior_entities, cut_entities, exterior_entities, padding_entities
 
 def tag_entities(mesh,
                  levelset,
@@ -91,7 +90,7 @@ def tag_entities(mesh,
         boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
                                          c2f_map[exterior_entities])
 
-        interior_fronteer_facets, cut_facets, exterior_facets = _select_entities(mesh, levelset, edim)
+        interior_fronteer_facets, cut_facets, exterior_facets, _ = _select_entities(mesh, levelset, edim)
         interior_facets = np.setdiff1d(interior_fronteer_facets, interior_boundary_facets)
         cut_facets = np.union1d(cut_facets, interior_boundary_facets)
         exterior_facets = np.setdiff1d(exterior_facets, boundary_facets)
