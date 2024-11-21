@@ -316,10 +316,11 @@ class FEMSolver:
     
     def set_variational_formulation(self, quadrature_degree=None):
         if quadrature_degree is None:
-            quadrature_degree = 2 * (self.FE_space.basix_element.degree + 1)
+            quadrature_degree = 2 * (self.FE_space.element.basix_element.degree + 1)
         
         f_h = self.rhs.interpolate(self.FE_space)
 
+        num_dofs = len(f_h.x.array[:])
         u = ufl.TrialFunction(self.FE_space)
         v = ufl.TestFunction(self.FE_space)
 
@@ -339,12 +340,13 @@ class FEMSolver:
 
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)
+        return num_dofs
 
     def assemble(self):
         self.A = assemble_matrix(self.bilinear_form, bcs=self.bcs)
         self.A.assemble()
         self.b = assemble_vector(self.linear_form)
-        dfx.fem.apply_lifting(self.b, [self.bilinear_form], self.bcs)
+        dfx.fem.apply_lifting(self.b, [self.bilinear_form], [self.bcs])
         dfx.fem.set_bc(self.b, self.bcs)
 
     def solve(self):
@@ -394,3 +396,31 @@ class FEMSolver:
         eta_h = dfx.fem.Function(V0)
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h = eta_h
+    
+    def marking(self, eta_h=None, theta=0.3):
+        if eta_h is None:
+            eta_h = self.eta_h
+        mesh = eta_h.function_space.mesh
+        cdim = mesh.topology.dim
+        fdim = cdim - 1
+        assert(mesh.comm.size == 1)
+        theta = 0.3
+
+        eta_global = sum(eta_h.x.array)
+        cutoff = theta * eta_global
+
+        sorted_cells = np.argsort(eta_h.x.array)[::-1]
+        rolling_sum = 0.0
+        for j, e in enumerate(eta_h.x.array[sorted_cells]):
+            rolling_sum += e
+            if rolling_sum > cutoff:
+                breakpoint = j
+                break
+
+        refine_cells = sorted_cells[0:breakpoint + 1]
+        indices = np.array(np.sort(refine_cells), dtype=np.int32)
+        c2f_connect = mesh.topology.connectivity(cdim, fdim)
+        num_facets_per_cell = len(c2f_connect.links(0))
+        c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
+        facets_indices = np.unique(np.sort(c2f_map[indices]))
+        return facets_indices

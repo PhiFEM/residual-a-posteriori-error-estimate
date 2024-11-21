@@ -1,5 +1,3 @@
 #!/bin/bash
-rm -rf output/
-mkdir output/
-mkdir output/bg_mesh
-mkdir output/submesh
+rm -rf output_FEM/
+rm -rf output_phiFEM/
