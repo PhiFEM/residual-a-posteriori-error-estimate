@@ -34,6 +34,7 @@ class PhiFEMSolver:
         self.bg_mesh_solution   = None
         self.FE_space           = None
         self.eta_h              = None
+        self.v0                 = None
     
     def _compute_normal(self, mesh):
         return compute_outward_normal(mesh, [self.bg_mesh_cells_tags, self.facets_tags], self.levelset)
@@ -194,7 +195,7 @@ class PhiFEMSolver:
 
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)
-
+        self.v0 = v0
         return v0, dx, dS, num_dofs
     
     def assemble(self):
@@ -245,18 +246,18 @@ class PhiFEMSolver:
             DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
             V0 = dfx.fem.functionspace(working_mesh, DG0Element)
 
-        v0 = ufl.TestFunction(V0)
+        w0 = ufl.TestFunction(V0)
 
         # Interior residual
-        eta_T = h_T**2 * inner(inner(r, r), v0) * (dx(1) + dx(2))
+        eta_T = h_T**2 * inner(inner(r, r), w0) * self.v0 * (dx(1) + dx(2))
 
         # Facets residual
-        eta_E = avg(h_E) * inner(inner(J_h, J_h), avg(v0)) * (dS(1) + dS(2))
+        eta_E = avg(h_E) * inner(inner(J_h, J_h) * avg(self.v0), avg(w0)) * (dS(1) + dS(2))
 
         eta = eta_T + eta_E
 
         if boundary_term:
-            eta_boundary = h_E * inner(inner(grad(uh), n), inner(grad(uh), n)) * v0 * ds
+            eta_boundary = h_E * inner(inner(grad(uh), n), inner(grad(uh), n)) * w0 * self.v0 * ds
             eta += eta_boundary
         
         eta_form = dfx.fem.form(eta)

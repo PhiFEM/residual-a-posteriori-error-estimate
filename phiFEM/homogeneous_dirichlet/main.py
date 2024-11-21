@@ -1,15 +1,18 @@
-from basix.ufl import element
+from   basix.ufl import element
 import dolfinx as dfx
-from dolfinx.io import XDMFFile
+from   dolfinx.io import XDMFFile
+from   dolfinx.fem.petsc import assemble_vector
 import jax.numpy as jnp
-from mpi4py import MPI
+from   mpi4py import MPI
 import numpy as np
 import os
-from petsc4py import PETSc
-from utils.solver import PhiFEMSolver, FEMSolver
+from   petsc4py import PETSc
+import ufl
+from   ufl import inner, grad
+
+from utils.solver import PhiFEMSolver
 from utils.continuous_functions import Levelset, ExactSolution
 from utils.saver import ResultsSaver
-from utils.mesh_scripts import mesh2d_from_levelset
 
 parent_dir = os.path.dirname(__file__)
 
@@ -57,7 +60,7 @@ def poisson_dirichlet_phiFEM(cl,
     """
     Create initial mesh
     """
-    cprint(f"Create initial mesh.", print_save)
+    cprint("Create initial mesh.", print_save)
     scaling_factor = 2.
 
     N = int(scaling_factor * np.sqrt(2.)/cl)
@@ -77,6 +80,9 @@ def poisson_dirichlet_phiFEM(cl,
     if print_save:
         results_saver = ResultsSaver(output_dir, data)
 
+    if compute_exact_error:
+        phiFEM_solutions = []
+    
     working_mesh = bg_mesh
     for i in range(max_it):
         cprint(f"Solver: phiFEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Creation FE space and data interpolation", print_save)
@@ -104,12 +110,15 @@ def poisson_dirichlet_phiFEM(cl,
         phiFEM_solver.solve()
         uh = phiFEM_solver.solution
 
+        if compute_exact_error:
+            phiFEM_solutions.append(uh)
+        
         working_mesh = phiFEM_solver.submesh
 
         cprint(f"Solver: phiFEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: a posteriori error estimation.", print_save)
         V = dfx.fem.functionspace(working_mesh, CG1Element)
         phiV = phi.interpolate(V)
-        phiFEM_solver.estimate_residual()
+        phiFEM_solver.estimate_residual(boundary_term=True)
         eta_h = phiFEM_solver.eta_h
         h10_est = np.sqrt(sum(eta_h.x.array[:]))
 
@@ -138,14 +147,76 @@ def poisson_dirichlet_phiFEM(cl,
                 working_mesh = dfx.mesh.refine(working_mesh, facets2ref)
 
         cprint("\n", print_save)
+    
+    if compute_exact_error:
+        results_error = {"L2 error": [], "H10 error": []}
+        extra_ref  = 5
+        ref_degree = 5
+        cprint(f"Solver: phiFEM. Method: {ref_method}. Compute exact errors.", print_save)
+
+        FEM_dir = os.path.join("output_FEM", *(os.path.split(output_dir)[1:]))
+        with XDMFFile(MPI.COMM_WORLD, os.path.join(FEM_dir, "conforming_mesh.xdmf"), "r") as fi:
+            reference_mesh = fi.read_mesh(name="Grid")
+        
+        for j in range(extra_ref):
+            reference_mesh.topology.create_entities(reference_mesh.topology.dim - 1)
+            reference_mesh = dfx.mesh.refine(reference_mesh)
+
+        CGfElement = element("CG", reference_mesh.topology.cell_name(), ref_degree)
+        reference_space = dfx.fem.functionspace(reference_mesh, CGfElement)
+
+        u_exact_ref = u_exact.interpolate(reference_space)
+
+        for i in range(max_it):
+            phiFEM_solution = phiFEM_solutions[i]
+
+            uh_ref = dfx.fem.Function(reference_space)
+            nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
+                                uh_ref.function_space.mesh,
+                                uh_ref.function_space.element,
+                                phiFEM_solution.function_space.mesh, padding=1.e-14)
+            uh_ref.interpolate(phiFEM_solution, nmm_interpolation_data=nmm)
+            e_ref = dfx.fem.Function(reference_space)
+            e_ref.x.array[:] = u_exact_ref.x.array - uh_ref.x.array
+
+            dx2 = ufl.Measure("dx",
+                              domain=reference_mesh,
+                              metadata={"quadrature_degree": 2 * (ref_degree + 1)})
+
+            DG0Element = element("DG", reference_mesh.topology.cell_name(), 0)
+            V0 = dfx.fem.functionspace(reference_mesh, DG0Element)
+            w0 = ufl.TrialFunction(V0)
+
+            L2_norm_local = inner(inner(e_ref, e_ref), w0) * dx2
+            H10_norm_local = inner(inner(grad(e_ref), grad(e_ref)), w0) * dx2
+
+            L2_error_0 = dfx.fem.Function(V0)
+            H10_error_0 = dfx.fem.Function(V0)
+
+            L2_norm_local_form = dfx.fem.form(L2_norm_local)
+            L2_error_0.x.array[:] = assemble_vector(L2_norm_local_form).array
+            results_error["L2 error"].append(np.sqrt(sum(L2_error_0.x.array[:])))
+
+            H10_norm_local_form = dfx.fem.form(H10_norm_local)
+            H10_error_0.x.array[:] = assemble_vector(H10_norm_local_form).array
+            results_error["H10 error"].append(np.sqrt(sum(H10_error_0.x.array[:])))
+
+            if print_save:
+                results_saver.save_function(L2_error_0,
+                                            f"L2_error_{str(i).zfill(2)}")
+                results_saver.save_function(H10_error_0,
+                                            f"H10_error_{str(i).zfill(2)}")
+
+        results_saver.add_new_values(results_error, prnt=True)
 
 if __name__=="__main__":
     poisson_dirichlet_phiFEM(0.2,
-                             25,
+                             20,
                              print_save=True,
                              ref_method="adaptive",
                              compute_exact_error=True)
-    poisson_dirichlet_phiFEM(0.2,
-                             9,
-                             print_save=True,
-                             ref_method="omega_h")
+    # poisson_dirichlet_phiFEM(0.2,
+    #                          8,
+    #                          print_save=True,
+    #                          ref_method="omega_h",
+    #                          compute_exact_error=True)

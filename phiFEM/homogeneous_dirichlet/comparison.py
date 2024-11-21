@@ -1,17 +1,21 @@
-from basix.ufl import element
+from   basix.ufl import element
 import dolfinx as dfx
-from dolfinx.io import XDMFFile
+from   dolfinx.io import XDMFFile
+from   dolfinx.fem.petsc import assemble_vector
 import jax.numpy as jnp
-from mpi4py import MPI
+from   mpi4py import MPI
 import numpy as np
 import os
-from petsc4py import PETSc
-from utils.solver import PhiFEMSolver, FEMSolver
+from   petsc4py import PETSc
+import ufl
+from   ufl import inner, grad
+
+from utils.solver import FEMSolver
 from utils.continuous_functions import Levelset, ExactSolution
 from utils.saver import ResultsSaver
 from utils.mesh_scripts import mesh2d_from_levelset
 
-from main import poisson_dirichlet_phiFEM, definition_continuous_functions
+from main import definition_continuous_functions
 
 parent_dir = os.path.dirname(__file__)
 
@@ -23,7 +27,8 @@ def poisson_dirichlet_FEM(cl,
                           max_it,
                           quadrature_degree=4,
                           print_save=False,
-                          ref_method="omega_h"):
+                          ref_method="omega_h",
+                          compute_exact_error=False):
     output_dir = os.path.join(parent_dir, "output_FEM", ref_method)
 
     if not os.path.isdir(output_dir):
@@ -63,7 +68,10 @@ def poisson_dirichlet_FEM(cl,
     with XDMFFile(MPI.COMM_WORLD, os.path.join(output_dir, "conforming_mesh.xdmf"), "r") as fi:
         conforming_mesh = fi.read_mesh(name="Grid")
 
-    data = ["dofs", "H10 estimator"]
+    if compute_exact_error:
+        data = ["dofs", "H10 estimator", "L2 error", "H10 error"]
+    else:
+        data = ["dofs", "H10 estimator"]
 
     if print_save:
         results_saver = ResultsSaver(output_dir, data)
@@ -100,17 +108,58 @@ def poisson_dirichlet_FEM(cl,
         FEM_solver.solve()
         uh = FEM_solver.solution
 
-        cprint(f"Solver: phiFEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: a posteriori error estimation.", print_save)
+        cprint(f"Solver: FEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: a posteriori error estimation.", print_save)
         FEM_solver.estimate_residual()
         eta_h = FEM_solver.eta_h
         h10_est = np.sqrt(sum(eta_h.x.array[:]))
+
+        if compute_exact_error:
+            cprint(f"Solver: FEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: compute exact errors.", print_save)
+            ref_degree = 2
+
+            CGfElement = element("CG", conforming_mesh.topology.cell_name(), ref_degree)
+            reference_space = dfx.fem.functionspace(conforming_mesh, CGfElement)
+
+            uh_ref = dfx.fem.Function(reference_space)
+            uh_ref.interpolate(uh)
+            u_exact_ref = u_exact.interpolate(reference_space)
+            e_ref = dfx.fem.Function(reference_space)
+            e_ref.x.array[:] = u_exact_ref.x.array - uh_ref.x.array
+
+            dx2 = ufl.Measure("dx",
+                            domain=conforming_mesh,
+                            metadata={"quadrature_degree": 2 * (ref_degree + 1)})
+
+            DG0Element = element("DG", conforming_mesh.topology.cell_name(), 0)
+            V0 = dfx.fem.functionspace(conforming_mesh, DG0Element)
+            w0 = ufl.TrialFunction(V0)
+
+            L2_norm_local = inner(inner(e_ref, e_ref), w0) * dx2
+            H10_norm_local = inner(inner(grad(e_ref), grad(e_ref)), w0) * dx2
+
+            L2_error_0 = dfx.fem.Function(V0)
+            H10_error_0 = dfx.fem.Function(V0)
+
+            L2_norm_local_form = dfx.fem.form(L2_norm_local)
+            L2_error_0.x.array[:] = assemble_vector(L2_norm_local_form).array
+            L2_error = np.sqrt(sum(L2_error_0.x.array[:]))
+
+            H10_norm_local_form = dfx.fem.form(H10_norm_local)
+            H10_error_0.x.array[:] = assemble_vector(H10_norm_local_form).array
+            H10_error = np.sqrt(sum(H10_error_0.x.array[:]))
+
+            if print_save:
+                results_saver.save_function(L2_error_0,
+                                            f"L2_error_{str(i).zfill(2)}")
+                results_saver.save_function(H10_error_0,
+                                            f"H10_error_{str(i).zfill(2)}")
 
         # Save results
         if print_save:
             results_saver.save_function(eta_h, f"eta_h_{str(i).zfill(2)}")
             results_saver.save_function(uh,    f"uh_{str(i).zfill(2)}")
 
-            results_saver.save_values([num_dofs, h10_est], prnt=True)
+            results_saver.save_values([num_dofs, h10_est, L2_error, H10_error], prnt=True)
 
         # Marking
         if i < max_it - 1:
@@ -126,13 +175,14 @@ def poisson_dirichlet_FEM(cl,
                 conforming_mesh = dfx.mesh.refine(conforming_mesh, facets2ref)
 
         cprint("\n", print_save)
-    
+
 if __name__=="__main__":
     poisson_dirichlet_FEM(0.2,
-                          25,
+                          20,
                           print_save=True,
-                          ref_method="adaptive")
-    poisson_dirichlet_FEM(0.2,
-                          9,
-                          print_save=True,
-                          ref_method="omega_h")
+                          ref_method="adaptive",
+                          compute_exact_error=True)
+    # poisson_dirichlet_FEM(0.2,
+    #                       9,
+    #                       print_save=True,
+    #                       ref_method="omega_h")
