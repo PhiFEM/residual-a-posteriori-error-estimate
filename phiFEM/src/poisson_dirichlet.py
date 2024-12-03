@@ -61,7 +61,7 @@ def poisson_dirichlet_phiFEM(cl,
     with XDMFFile(bg_mesh.comm, "./bg_mesh.xdmf", "w") as of:
         of.write_mesh(bg_mesh)
 
-    data = ["dofs", "H10 estimator"]
+    data = ["dofs", "H10 estimator", "L2 estimator"]
 
     if save_output:
         results_saver = ResultsSaver(output_dir, data)
@@ -89,7 +89,7 @@ def poisson_dirichlet_phiFEM(cl,
         cprint(f"Solver: phiFEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Mesh tags computation.", save_output)
         phiFEM_solver.compute_tags(padding=True)
         cprint(f"Solver: phiFEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Variational formulation set up.", save_output)
-        v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation(sigma=20.)
+        v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
         cprint(f"Solver: phiFEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Linear system assembly.", save_output)
         phiFEM_solver.assemble()
         cprint(f"Solver: phiFEM. Method: {ref_method}. Iteration n° {str(i).zfill(2)}: Solve.", save_output)
@@ -147,7 +147,10 @@ def poisson_dirichlet_phiFEM(cl,
         FEM_dir_list = [subdir if subdir!="output_phiFEM" else "output_FEM" for subdir in output_dir.split(sep=os.sep)]
         FEM_dir = os.path.join("/", *(FEM_dir_list))
         with XDMFFile(MPI.COMM_WORLD, os.path.join(FEM_dir, "conforming_mesh.xdmf"), "r") as fi:
-            reference_mesh = fi.read_mesh(name="Grid")
+            try:
+                reference_mesh = fi.read_mesh(name="Grid")
+            except FileNotFoundError:
+                print("In order to compute the exact errors, you must have run the FEM refinement loop first.")
         
         for j in range(extra_ref):
             reference_mesh.topology.create_entities(reference_mesh.topology.dim - 1)
@@ -236,7 +239,7 @@ def poisson_dirichlet_FEM(cl,
                           ref_method="uniform",
                           geom_vertices=None,
                           save_output=True):
-    output_dir = os.path.join(source_dir, "output_phiFEM", ref_method)
+    output_dir = os.path.join(source_dir, "output_FEM", ref_method)
     compute_exact_error = expression_u_exact is not None
 
     if save_output:
@@ -266,7 +269,7 @@ def poisson_dirichlet_FEM(cl,
         conforming_mesh = fi.read_mesh(name="Grid")
 
     if compute_exact_error:
-        data = ["dofs", "H10 estimator", "L2 error", "H10 error"]
+        data = ["dofs", "H10 estimator", "L2 estimator", "L2 error", "H10 error"]
     else:
         data = ["dofs", "H10 estimator", "L2 estimator"]
 

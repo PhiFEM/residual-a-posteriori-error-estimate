@@ -90,6 +90,7 @@ class PhiFEMSolver:
         # Tag cells of the background mesh. Used to tag the facets and/or create the submesh.
         self.bg_mesh_cells_tags = tag_entities(self.bg_mesh, self.levelset, self.bg_mesh.topology.dim, padding=padding)
         working_cells_tags = self.bg_mesh_cells_tags
+
         # Create the submesh and transfer the cells tags from the bg mesh to the submesh.
         # Tag the facets of the submesh.
         omega_h_cells = self.bg_mesh_cells_tags.indices[np.where(np.logical_or(np.logical_or(self.bg_mesh_cells_tags.values == 1, self.bg_mesh_cells_tags.values == 2), self.bg_mesh_cells_tags.values == 4))]
@@ -101,6 +102,7 @@ class PhiFEMSolver:
         self.facets_tags = tag_entities(working_mesh, self.levelset, working_mesh.topology.dim - 1, cells_tags=working_cells_tags)
 
         if plot:
+            print("WARNING: We plot the tags for the cells and facets: might drastically slow the refinement loop!")
             figure, ax = plt.subplots()
             plot_mesh_tags(working_mesh, self.facets_tags, ax=ax, display_indices=False, expression_levelset=self.levelset.expression)
             plt.savefig(f"./output_phiFEM/test_facets_{str(self.i).zfill(2)}.svg", format="svg", dpi=2400)
@@ -274,8 +276,8 @@ class PhiFEMSolver:
         """
         L2 estimator
         """
-        eta_T = h_T**4 * inner(inner(r, r), w0) * dx
-        eta_E = avg(h_E)**3 * inner(inner(J_h, J_h), avg(w0)) * dS
+        eta_T = h_T**4 * inner(inner(r, r), w0) * (dx(1) + dx(2))
+        eta_E = avg(h_E)**3 * inner(inner(J_h, J_h), avg(w0)) * (dS(1) + dS(2))
 
         eta = eta_T + eta_E
 

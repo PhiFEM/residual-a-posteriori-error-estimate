@@ -77,7 +77,7 @@ def tag_entities(mesh,
         interior_entities     = cells_tags.indices[np.where(cells_tags.values == 1)]
         cut_fronteer_entities = cells_tags.indices[np.where(cells_tags.values == 2)]
         exterior_entities     = cells_tags.indices[np.where(cells_tags.values == 3)]
-
+        padding_entities      = cells_tags.indices[np.where(cells_tags.values == 4)]
     if edim == mesh.topology.dim - 1:
         # Get the indices of facets belonging to cells in interior_entities and cut_fronteer_entities
         mesh.topology.create_connectivity(cdim, edim)
@@ -88,7 +88,7 @@ def tag_entities(mesh,
         interior_boundary_facets = np.intersect1d(c2f_map[interior_entities],
                                                   c2f_map[cut_fronteer_entities])
         boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
-                                         c2f_map[exterior_entities])
+                                         np.union1d(c2f_map[exterior_entities], c2f_map[padding_entities]))
 
         interior_fronteer_facets, cut_facets, exterior_facets, _ = _select_entities(mesh, levelset, edim)
         interior_facets = np.setdiff1d(interior_fronteer_facets, interior_boundary_facets)
@@ -107,11 +107,20 @@ def tag_entities(mesh,
                  cut_facets,
                  exterior_facets,
                  boundary_facets]
+        
+        assert len(interior_facets) > 0, "No interior facets (1) tagged!"
+        assert len(cut_facets)      > 0, "No cut facets (2) tagged!"
+        assert len(boundary_facets) > 0, "No boundary facets (4) tagged!"
     elif edim == mesh.topology.dim:
         lists = [interior_entities,
                  cut_fronteer_entities,
                  exterior_entities,
                  padding_entities]
+
+        assert len(interior_entities)     > 0,  "No interior cells (1) tagged!"
+        assert len(cut_fronteer_entities) > 0,  "No cut cells (2) tagged!"
+        if padding:
+            assert len(padding_entities)  > 0, "No padding cells (4) tagged!"
 
     list_markers = [np.full_like(l, i+1) for i, l in enumerate(lists)]
     entities_indices = np.hstack(lists).astype(np.int32)
