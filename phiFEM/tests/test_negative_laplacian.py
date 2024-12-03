@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from utils.continuous_functions import ExactSolution
+from phiFEM.src.continuous_functions import ExactSolution
 
 """
 Data_n° = ("Fct formula",      num_var, (lambda x: expression fct),                         (lambda x: expression negative laplacian))

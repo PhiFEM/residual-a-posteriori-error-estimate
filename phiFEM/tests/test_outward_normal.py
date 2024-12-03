@@ -7,9 +7,9 @@ import pygmsh as pg
 import pytest
 import os
 
-from utils.compute_meshtags import tag_entities
-from utils.continuous_functions import Levelset
-from utils.mesh_scripts import (reshape_facets_map,
+from phiFEM.src.compute_meshtags import tag_entities
+from phiFEM.src.continuous_functions import Levelset
+from phiFEM.src.mesh_scripts import (reshape_facets_map,
                                 compute_outward_normal)
 
 parent_dir = os.path.dirname(__file__)
