@@ -18,5 +18,5 @@ RUN python3 -m pip install -U pip
 # ENV PYTHONPATH="$PYTHONPATH:/usr/local/bin/MarchingNumPy/"
 
 # Install dependencies:
-RUN pip install pandas jax meshio pygmsh h5py
+RUN pip install pandas jax meshio pygmsh h5py lxml
 ENV PYTHONPATH="$PYTHONPATH:/home/dolfinx/shared/phiFEM/"

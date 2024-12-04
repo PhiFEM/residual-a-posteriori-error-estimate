@@ -15,6 +15,7 @@ import os
 import pygmsh
 import ufl
 from ufl import inner, grad
+from lxml import etree
 
 def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1., 1.]]), geom_vertices=None, output_dir=None):
     """ Generate a 2D conforming mesh from a levelset function and saves it as an xdmf mesh.
@@ -54,6 +55,16 @@ def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1.,
 
     if output_dir is not None:
         meshio.write_points_cells(os.path.join(output_dir, "conforming_mesh.xdmf"), mesh.points, triangular_cells)
+    
+    # meshio and dolfinx use incompatible Grid names ("Grid" for meshio and "mesh" for dolfinx)
+    # the lines below change the Grid name from "Grid" to "mesh" to ensure the compatibility between meshio and dolfinx.
+    tree = etree.parse(os.path.join(output_dir, "conforming_mesh.xdmf"))
+    root = tree.getroot()
+
+    for grid in root.findall(".//Grid"):
+        grid.set("Name", "mesh")
+    
+    tree.write(os.path.join(output_dir, "conforming_mesh.xdmf"), pretty_print=True, xml_declaration=True, encoding="UTF-8")
     return boundary_vertices
 
 def compute_outward_normal(mesh, mesh_tags, levelset):

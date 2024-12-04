@@ -69,7 +69,6 @@ if __name__=="__main__":
                                  bg_mesh_corners=[np.array([-1., -1.]),
                                                   np.array([ 1.,  1.])],
                                  ref_method=ref_method,
-                                 save_output=True,
                                  compute_exact_error=True)
     
     if solver=="FEM":
@@ -84,8 +83,8 @@ if __name__=="__main__":
         poisson_dirichlet_FEM(cl,
                               num_it,
                               expression_levelset,
+                              parent_dir,
                               expression_rhs=expression_rhs,
                               quadrature_degree=4,
-                              output_dir=output_dir,
                               ref_method=ref_method,
                               geom_vertices=geom_vertices)

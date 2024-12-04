@@ -140,21 +140,28 @@ def poisson_dirichlet_phiFEM(cl,
     
     if compute_exact_error:
         results_error = {"L2 error": [], "H10 error": []}
-        extra_ref  = 6
-        ref_degree = 3
+        extra_ref  = 1
+        ref_degree = 2
         cprint(f"Solver: phiFEM. Method: {ref_method}. Compute exact errors.", save_output)
 
         FEM_dir_list = [subdir if subdir!="output_phiFEM" else "output_FEM" for subdir in output_dir.split(sep=os.sep)]
         FEM_dir = os.path.join("/", *(FEM_dir_list))
+
         with XDMFFile(MPI.COMM_WORLD, os.path.join(FEM_dir, "conforming_mesh.xdmf"), "r") as fi:
             try:
-                reference_mesh = fi.read_mesh(name="Grid")
+                reference_mesh = fi.read_mesh()
             except FileNotFoundError:
                 print("In order to compute the exact errors, you must have run the FEM refinement loop first.")
         
+        # We perform extra uniform refinement
         for j in range(extra_ref):
             reference_mesh.topology.create_entities(reference_mesh.topology.dim - 1)
             reference_mesh = dfx.mesh.refine(reference_mesh)
+
+        # Computes hmin in order to ensure that the reference mesh is fine enough
+        tdim = reference_mesh.topology.dim
+        num_cells = reference_mesh.topology.index_map(tdim).size_global
+        reference_hmin = dfx.cpp.mesh.h(reference_mesh._cpp_object, tdim, np.arange(num_cells)).min()
 
         CGfElement = element("CG", reference_mesh.topology.cell_name(), ref_degree)
         reference_space = dfx.fem.functionspace(reference_mesh, CGfElement)
@@ -187,7 +194,15 @@ def poisson_dirichlet_phiFEM(cl,
             u_exact_ref = FEM_solver.solution
 
         for i in range(max_it):
+            cprint(f"Solver: phiFEM. Method: {ref_method}. Exact error computation iteration n° {str(i).zfill(2)}.", save_output)
             phiFEM_solution = phiFEM_solutions[i]
+
+            # Computes the hmin in order to compare with reference mesh
+            current_mesh = phiFEM_solution.function_space.mesh
+            tdim = current_mesh.topology.dim
+            num_cells = current_mesh.topology.index_map(tdim).size_global
+            current_hmin = dfx.cpp.mesh.h(current_mesh._cpp_object, tdim, np.arange(num_cells)).min()
+            assert reference_hmin < current_hmin, "The reference mesh is not fine enough to ensure the accuracy of the exact error computation."
 
             uh_ref = dfx.fem.Function(reference_space)
             nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
@@ -264,9 +279,9 @@ def poisson_dirichlet_FEM(cl,
                              phi,
                              geom_vertices=geom_vertices,
                              output_dir=output_dir)
-    
+
     with XDMFFile(MPI.COMM_WORLD, os.path.join(output_dir, "conforming_mesh.xdmf"), "r") as fi:
-        conforming_mesh = fi.read_mesh(name="Grid")
+        conforming_mesh = fi.read_mesh()
 
     if compute_exact_error:
         data = ["dofs", "H10 estimator", "L2 estimator", "L2 error", "H10 error"]
@@ -380,4 +395,8 @@ def poisson_dirichlet_FEM(cl,
                 facets2ref = FEM_solver.marking()
                 conforming_mesh = dfx.mesh.refine(conforming_mesh, facets2ref)
 
+        if save_output:
+            with XDMFFile(MPI.COMM_WORLD, os.path.join(output_dir, "conforming_mesh.xdmf"), "w") as of:
+                of.write_mesh(conforming_mesh)
+        
         cprint("\n", save_output)
