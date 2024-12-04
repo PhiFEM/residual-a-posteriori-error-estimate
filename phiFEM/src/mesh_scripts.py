@@ -12,8 +12,60 @@ import matplotlib.tri as tri
 import meshio
 import numpy as np
 import os
+import pygmsh
 import ufl
 from ufl import inner, grad
+from lxml import etree
+
+def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1., 1.]]), geom_vertices=None, output_dir=None):
+    """ Generate a 2D conforming mesh from a levelset function and saves it as an xdmf mesh.
+
+    Args:
+        lc:            characteristic length of the mesh.
+        levelset:      levelset function (as a Levelset object).
+        level:         the level of the isoline (default: 0.).
+        bbox:          bounding box of the isoline (default: np.array([[-1., 1.], [-1., 1.]])).
+        geom_vertices: specific vertices to be added to the isoline (e.g. vertices of the geometry.)
+        output_dir:    directory path where the mesh is saved. If None the mesh is not saved.
+
+    Returns:
+        The coordinates of the boundary vertices.
+    """
+
+    x = np.arange(bbox[0,0], bbox[0,1], step=lc/np.sqrt(2.), dtype=np.float64)
+    y = np.arange(bbox[1,0], bbox[1,1], step=lc/np.sqrt(2.), dtype=np.float64)
+    X, Y = np.meshgrid(x, y, indexing="ij")
+    X_flat, Y_flat = X.flatten(), Y.flatten()
+    Z_flat = levelset(X_flat, Y_flat)
+    Z = np.reshape(Z_flat, X.shape)
+
+    c = plt.contour(X, Y, Z, [level])
+    boundary_vertices = c.collections[0].get_paths()[0].vertices
+    if geom_vertices is not None:
+        boundary_vertices = np.vstack(geom_vertices)
+    
+    with pygmsh.geo.Geometry() as geom:
+        # The boundary vertices are correctly ordered by matplotlib.
+        geom.add_polygon(boundary_vertices, mesh_size=lc)
+        mesh = geom.generate_mesh(dim=2)
+
+    for cell_block in mesh.cells:
+        if cell_block.type == "triangle":
+            triangular_cells = [("triangle", cell_block.data)]
+
+    if output_dir is not None:
+        meshio.write_points_cells(os.path.join(output_dir, "conforming_mesh.xdmf"), mesh.points, triangular_cells)
+    
+    # meshio and dolfinx use incompatible Grid names ("Grid" for meshio and "mesh" for dolfinx)
+    # the lines below change the Grid name from "Grid" to "mesh" to ensure the compatibility between meshio and dolfinx.
+    tree = etree.parse(os.path.join(output_dir, "conforming_mesh.xdmf"))
+    root = tree.getroot()
+
+    for grid in root.findall(".//Grid"):
+        grid.set("Name", "mesh")
+    
+    tree.write(os.path.join(output_dir, "conforming_mesh.xdmf"), pretty_print=True, xml_declaration=True, encoding="UTF-8")
+    return boundary_vertices
 
 def compute_outward_normal(mesh, mesh_tags, levelset):
     # This function is used to define the unit outward pointing normal to Gamma_h
@@ -64,7 +116,7 @@ def msh2xdmf_conversion_2D(msh_file_path, cell_type, prune_z=False):
     name = os.path.splitext(name_ext)[0]
     meshio.write(os.path.join(path, name, ".xdmf"), triangle_mesh)
 
-def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False):
+def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False, expression_levelset=None):
     """Plot a mesh tags object on the provied (or, if None, the current) axes object."""
     if ax is None:
         ax = plt.gca()
@@ -128,13 +180,29 @@ def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False):
                     midpoint = np.sum(points[vertices], axis=0)/np.shape(points[vertices])[0]
                     ax.text(midpoint[0], midpoint[1], f"{f}", horizontalalignment="center", verticalalignment="center", fontsize=6)
         mappable: mpl.collections.Collection = mpl.collections.LineCollection(  # type: ignore[no-redef]
-            lines, cmap="tab10", norm=norm, colors=lines_colors_as_str, linestyles=lines_linestyles, linewidth=0.1)
+            lines, cmap="tab10", norm=norm, colors=lines_colors_as_str, linestyles=lines_linestyles, linewidth=0.2)
         mappable.set_array(np.array(lines_colors_as_int))
         ax.add_collection(mappable)
         ax.autoscale()
     divider = mpl_toolkits.axes_grid1.make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
     plt.colorbar(mappable, cax=cax, boundaries=cmap_bounds, ticks=cmap_bounds)
+
+    if expression_levelset is not None:
+        x_min, x_max = np.min(points[:,0]), np.max(points[:,0])
+        y_min, y_max = np.min(points[:,1]), np.max(points[:,1])
+        nx = 1000
+        ny = 1000
+        xs = np.linspace(x_min, x_max, nx)
+        ys = np.linspace(y_min, y_max, ny)
+
+        xx, yy = np.meshgrid(xs, ys)
+        xx_rs = xx.reshape(xx.shape[0] * xx.shape[1])
+        yy_rs = yy.reshape(yy.shape[0] * yy.shape[1])
+        zz_rs = expression_levelset(xx_rs, yy_rs)
+        zz = zz_rs.reshape(xx.shape)
+
+        ax.contour(xx, yy, zz, [0.], linewidths=0.2)
     return ax
 
 def compute_facets_to_refine(mesh, facets_tags):

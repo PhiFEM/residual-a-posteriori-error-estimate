@@ -2,8 +2,8 @@ from dolfinx.io import XDMFFile
 from mpi4py import MPI
 import numpy as np
 import pytest
-from utils.compute_meshtags import tag_entities
-from utils.classes import Levelset
+from phiFEM.src.compute_meshtags import tag_entities
+from phiFEM.src.continuous_functions import Levelset
 import os
 from test_outward_normal import create_mesh
 
@@ -65,7 +65,7 @@ def test_compute_meshtags(data_name, mesh_name, levelset, cells_benchmark_name, 
 
 if __name__=="__main__":
     # For debugging purpose only
-    from utils.mesh_scripts import plot_mesh_tags
+    from phiFEM.src.mesh_scripts import plot_mesh_tags
     import matplotlib.pyplot as plt
 
     mesh_path = os.path.join(parent_dir, "tests_data", "disk" + ".xdmf")

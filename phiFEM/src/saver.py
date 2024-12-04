@@ -25,6 +25,12 @@ class ResultsSaver:
         if prnt:
             print(self.dataframe)
     
+    def add_new_values(self, new_dict, prnt=False):
+        self.dataframe = self.dataframe.assign(**new_dict)
+        self.dataframe.to_csv(os.path.join(self.output_path, "results.csv"))
+        if prnt:
+            print(self.dataframe)
+    
     def save_function(self, function, file_name):
         mesh = function.function_space.mesh
         with XDMFFile(mesh.comm, os.path.join(self.output_path, "functions",  file_name + ".xdmf"), "w") as of:

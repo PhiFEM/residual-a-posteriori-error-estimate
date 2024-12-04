@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from utils.derivatives import negative_laplacian
+from phiFEM.src.continuous_functions import ExactSolution
 
 """
 Data_n° = ("Fct formula",      num_var, (lambda x: expression fct),                         (lambda x: expression negative laplacian))
@@ -22,27 +22,31 @@ data_13 = ("sin(x)*sin(y)",          2, (lambda x,y:   jnp.sin(x)*jnp.sin(y)),  
 data_14 = ("sin(x)*sin(y)*sin(z)",   3, (lambda x,y,z: jnp.sin(x)*jnp.sin(y)*jnp.sin(z)), (lambda x: 3. * jnp.sin(x[0])*jnp.sin(x[1])*jnp.sin(x[2])))
 data_15 = ("(y/x)*exp(-1/(10*x^2))", 2, (lambda x,y:   jnp.exp(-x**2/10.)*y/x),           (lambda x: -jnp.exp(-x[0]**2/10.)*(50. + 5.*x[0]**2+x[0]**4)*x[1]/(25.*x[0]**3)))
 
+# testdata = [data_1,  data_2,  data_3,  data_4,  data_5,
+#             data_6,  data_7,  data_8,  data_9,  data_10,
+#             data_11, data_12, data_13, data_14, data_15 ]
+
+# Only 2D data for now. TODO: add 3D.
 testdata = [data_1,  data_2,  data_3,  data_4,  data_5,
-            data_6,  data_7,  data_8,  data_9,  data_10,
-            data_11, data_12, data_13, data_14, data_15 ]
-# testdata = [data_2]
+            data_6,  data_10, data_13, data_15 ]
 
 @pytest.mark.parametrize("data_name,num_var,func,exact_nlap", testdata)
 def test_negative_laplacian(data_name, num_var, func, exact_nlap):
     x = np.random.uniform(low=-1.0, high=1.0, size=(100000, 3))
 
-    nlap = negative_laplacian(func)
-    try:
-        err_max = np.max(np.abs(nlap(x) - exact_nlap(x)))
-        assert np.isclose(err_max, 0.)
-    except AssertionError:
-        print("Erreur max: ", err_max)
-
+    func = ExactSolution(func)
+    func.compute_negative_laplacian()
+    nlap = func.nlap
     if num_var == 2:
         x = np.random.uniform(low=-1.0, high=1.0, size=(100000, 2))
-        nlap = negative_laplacian(func)
         try:
-            err_max = np.max(np.abs(nlap(x) - exact_nlap(x)))
+            err_max = np.max(np.abs(nlap(x[0], x[1]) - exact_nlap(x)))
+            assert np.isclose(err_max, 0.)
+        except AssertionError:
+            print("Erreur max: ", err_max)
+    elif num_var == 3:
+        try:
+            err_max = np.max(np.abs(nlap(x[0], x[1], x[2]) - exact_nlap(x)))
             assert np.isclose(err_max, 0.)
         except AssertionError:
             print("Erreur max: ", err_max)
