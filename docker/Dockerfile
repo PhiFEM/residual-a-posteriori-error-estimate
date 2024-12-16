@@ -18,5 +18,10 @@ RUN python3 -m pip install -U pip
 # ENV PYTHONPATH="$PYTHONPATH:/usr/local/bin/MarchingNumPy/"
 
 # Install dependencies:
-RUN pip install pandas jax meshio pygmsh h5py lxml
-ENV PYTHONPATH="$PYTHONPATH:/home/dolfinx/shared/phiFEM/"
+# pandas: save the results
+# jax:    perform automatic differentiation
+# meshio: create the conforming meshes
+# pygmsh: create the conforming meshes
+# lxml:   change the xdmf meshes names to make meshio compatible with dolfinx
+RUN pip install pandas jax meshio pygmsh lxml
+ENV PYTHONPATH="$PYTHONPATH:/home/dolfinx/shared/"
