@@ -17,7 +17,7 @@ import ufl
 from ufl import inner, grad
 from lxml import etree
 
-def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1., 1.]]), geom_vertices=None, output_dir=None):
+def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1., 1.]]), geom_vertices=None, output_dir=None, file_name="conforming_mesh"):
     """ Generate a 2D conforming mesh from a levelset function and saves it as an xdmf mesh.
 
     Args:
@@ -40,36 +40,38 @@ def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1.,
     Z = np.reshape(Z_flat, X.shape)
 
     c = plt.contour(X, Y, Z, [level])
-    boundary_vertices = c.collections[0].get_paths()[0].vertices
+    boundary_vertices = c.get_paths()[0].vertices
     if geom_vertices is not None:
         boundary_vertices = np.vstack(geom_vertices)
     
     with pygmsh.geo.Geometry() as geom:
         # The boundary vertices are correctly ordered by matplotlib.
         geom.add_polygon(boundary_vertices, mesh_size=lc)
-        mesh = geom.generate_mesh(dim=2)
+        # http://gmsh.info/doc/texinfo/gmsh.html#index-Mesh_002eAlgorithm
+        # algorithm=9 for structured mesh (packing of parallelograms)
+        mesh = geom.generate_mesh(dim=2, algorithm=6)
 
     for cell_block in mesh.cells:
         if cell_block.type == "triangle":
             triangular_cells = [("triangle", cell_block.data)]
 
     if output_dir is not None:
-        meshio.write_points_cells(os.path.join(output_dir, "conforming_mesh.xdmf"), mesh.points, triangular_cells)
+        meshio.write_points_cells(os.path.join(output_dir, f"{file_name}.xdmf"), mesh.points, triangular_cells)
     
-    # meshio and dolfinx use incompatible Grid names ("Grid" for meshio and "mesh" for dolfinx)
-    # the lines below change the Grid name from "Grid" to "mesh" to ensure the compatibility between meshio and dolfinx.
-    tree = etree.parse(os.path.join(output_dir, "conforming_mesh.xdmf"))
-    root = tree.getroot()
+        # meshio and dolfinx use incompatible Grid names ("Grid" for meshio and "mesh" for dolfinx)
+        # the lines below change the Grid name from "Grid" to "mesh" to ensure the compatibility between meshio and dolfinx.
+        tree = etree.parse(os.path.join(output_dir, f"{file_name}.xdmf"))
+        root = tree.getroot()
 
-    for grid in root.findall(".//Grid"):
-        grid.set("Name", "mesh")
-    
-    tree.write(os.path.join(output_dir, "conforming_mesh.xdmf"), pretty_print=True, xml_declaration=True, encoding="UTF-8")
+        for grid in root.findall(".//Grid"):
+            grid.set("Name", "mesh")
+        
+        tree.write(os.path.join(output_dir, f"{file_name}.xdmf"), pretty_print=True, xml_declaration=True, encoding="UTF-8")
     return boundary_vertices
 
-def compute_outward_normal(mesh, mesh_tags, levelset):
+def compute_outward_normal(mesh, levelset):
     # This function is used to define the unit outward pointing normal to Gamma_h
-    CG1Element = element("CG", mesh.topology.cell_name(), 1)
+    CG1Element = element("Lagrange", mesh.topology.cell_name(), 1)
     V = dfx.fem.functionspace(mesh, CG1Element)
     DG0VecElement = element("DG", mesh.topology.cell_name(), 0, shape=(mesh.topology.dim,))
     W0 = dfx.fem.functionspace(mesh, DG0VecElement)
