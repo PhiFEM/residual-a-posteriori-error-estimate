@@ -12,12 +12,75 @@ import matplotlib.tri as tri
 import meshio
 import numpy as np
 import os
+import pygmsh
 import ufl
 from ufl import inner, grad
+from lxml import etree
 
-def compute_outward_normal(mesh, mesh_tags, levelset):
+def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1., 1.]]), geom_vertices=None, output_dir=None, file_name="conforming_mesh"):
+    """ Generate a 2D conforming mesh from a levelset function and saves it as an xdmf mesh.
+
+    Args:
+        lc:            characteristic length of the mesh.
+        levelset:      levelset function (as a Levelset object).
+        level:         the level of the isoline (default: 0.).
+        bbox:          bounding box of the isoline (default: np.array([[-1., 1.], [-1., 1.]])).
+        geom_vertices: specific vertices to be added to the isoline (e.g. vertices of the geometry.)
+        output_dir:    directory path where the mesh is saved. If None the mesh is not saved.
+
+    Returns:
+        The coordinates of the boundary vertices.
+    """
+
+    x = np.arange(bbox[0,0], bbox[0,1], step=lc/np.sqrt(2.), dtype=np.float64)
+    y = np.arange(bbox[1,0], bbox[1,1], step=lc/np.sqrt(2.), dtype=np.float64)
+    X, Y = np.meshgrid(x, y, indexing="ij")
+    X_flat, Y_flat = X.flatten(), Y.flatten()
+    Z_flat = levelset(X_flat, Y_flat)
+    Z = np.reshape(Z_flat, X.shape)
+
+    c = plt.contour(X, Y, Z, [level])
+    boundary_vertices = c.get_paths()[0].vertices
+    if geom_vertices is not None:
+        boundary_vertices = np.vstack(geom_vertices)
+    
+    with pygmsh.geo.Geometry() as geom:
+        # The boundary vertices are correctly ordered by matplotlib.
+        geom.add_polygon(boundary_vertices, mesh_size=lc)
+        # http://gmsh.info/doc/texinfo/gmsh.html#index-Mesh_002eAlgorithm
+        # algorithm=9 for structured mesh (packing of parallelograms)
+        mesh = geom.generate_mesh(dim=2, algorithm=6)
+
+    for cell_block in mesh.cells:
+        if cell_block.type == "triangle":
+            triangular_cells = [("triangle", cell_block.data)]
+
+    if output_dir is not None:
+        meshio.write_points_cells(os.path.join(output_dir, f"{file_name}.xdmf"), mesh.points, triangular_cells)
+    
+        # meshio and dolfinx use incompatible Grid names ("Grid" for meshio and "mesh" for dolfinx)
+        # the lines below change the Grid name from "Grid" to "mesh" to ensure the compatibility between meshio and dolfinx.
+        tree = etree.parse(os.path.join(output_dir, f"{file_name}.xdmf"))
+        root = tree.getroot()
+
+        for grid in root.findall(".//Grid"):
+            grid.set("Name", "mesh")
+        
+        tree.write(os.path.join(output_dir, f"{file_name}.xdmf"), pretty_print=True, xml_declaration=True, encoding="UTF-8")
+    return boundary_vertices
+
+def compute_outward_normal(mesh, levelset):
+    """ Compute the outward normal to Omega_h.
+
+    Args:
+        mesh: the mesh on which the levelset is discretized.
+        levelset: the levelset defining Omega_h.
+    
+    Returns:
+        w0: the vector field defining the outward normal.
+    """
     # This function is used to define the unit outward pointing normal to Gamma_h
-    CG1Element = element("CG", mesh.topology.cell_name(), 1)
+    CG1Element = element("Lagrange", mesh.topology.cell_name(), 1)
     V = dfx.fem.functionspace(mesh, CG1Element)
     DG0VecElement = element("DG", mesh.topology.cell_name(), 0, shape=(mesh.topology.dim,))
     W0 = dfx.fem.functionspace(mesh, DG0VecElement)
@@ -37,6 +100,14 @@ def compute_outward_normal(mesh, mesh_tags, levelset):
     return w0
 
 def reshape_facets_map(f2c_connect):
+    """ Reshape the facets-to-cells indices mapping.
+
+    Args:
+        f2c_connect: the facets-to-cells connectivity.
+    
+    Returns:
+        The facets-to-cells mapping as a ndarray.
+    """
     f2c_array = f2c_connect.array
     num_cells_per_facet = np.diff(f2c_connect.offsets)
     max_cells_per_facet = num_cells_per_facet.max()
@@ -52,20 +123,20 @@ def reshape_facets_map(f2c_connect):
     f2c_map[mask, 1] = f2c_array[num_cells_per_facet.cumsum()[mask] - 1]
     return f2c_map
 
-def msh2xdmf_conversion_2D(msh_file_path, cell_type, prune_z=False):
-    mesh = meshio.read(msh_file_path)
-    cells = mesh.get_cells_type(cell_type)
-    cell_data = mesh.get_cell_data("gmsh:physical", cell_type)
-    points = mesh.points[:, :2] if prune_z else mesh.points
-    triangle_mesh = meshio.Mesh(points=points,
-                                cells={cell_type: cells},
-                                cell_data={"name_to_read": [cell_data.astype(np.int32)]})
-    path, name_ext = os.path.split(msh_file_path)
-    name = os.path.splitext(name_ext)[0]
-    meshio.write(os.path.join(path, name, ".xdmf"), triangle_mesh)
 
-def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False):
-    """Plot a mesh tags object on the provied (or, if None, the current) axes object."""
+def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False, expression_levelset=None):
+    """Plot a mesh tags object on the provied (or, if None, the current) axes object.
+    
+    Args:
+        mesh: the corresponding mesh.
+        mesh_tags: the mesh tags.
+        ax: (optional) the matplotlib axes.
+        display_indices: (optional) boolean, if True displays the indices of the cells/facets.
+        expression_levelset: (optional), if not None, display the contour line of the levelset.
+    
+    Returns:
+        A matplotlib axis with the corresponding plot.
+    """
     if ax is None:
         ax = plt.gca()
     ax.set_aspect("equal")
@@ -128,31 +199,27 @@ def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False):
                     midpoint = np.sum(points[vertices], axis=0)/np.shape(points[vertices])[0]
                     ax.text(midpoint[0], midpoint[1], f"{f}", horizontalalignment="center", verticalalignment="center", fontsize=6)
         mappable: mpl.collections.Collection = mpl.collections.LineCollection(  # type: ignore[no-redef]
-            lines, cmap="tab10", norm=norm, colors=lines_colors_as_str, linestyles=lines_linestyles, linewidth=0.1)
+            lines, cmap="tab10", norm=norm, colors=lines_colors_as_str, linestyles=lines_linestyles, linewidth=0.2)
         mappable.set_array(np.array(lines_colors_as_int))
         ax.add_collection(mappable)
         ax.autoscale()
     divider = mpl_toolkits.axes_grid1.make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
     plt.colorbar(mappable, cax=cax, boundaries=cmap_bounds, ticks=cmap_bounds)
+
+    if expression_levelset is not None:
+        x_min, x_max = np.min(points[:,0]), np.max(points[:,0])
+        y_min, y_max = np.min(points[:,1]), np.max(points[:,1])
+        nx = 1000
+        ny = 1000
+        xs = np.linspace(x_min, x_max, nx)
+        ys = np.linspace(y_min, y_max, ny)
+
+        xx, yy = np.meshgrid(xs, ys)
+        xx_rs = xx.reshape(xx.shape[0] * xx.shape[1])
+        yy_rs = yy.reshape(yy.shape[0] * yy.shape[1])
+        zz_rs = expression_levelset(xx_rs, yy_rs)
+        zz = zz_rs.reshape(xx.shape)
+
+        ax.contour(xx, yy, zz, [0.], linewidths=0.2)
     return ax
-
-def compute_facets_to_refine(mesh, facets_tags):
-    cdim = mesh.topology.dim
-    fdim = mesh.topology.dim - 1
-    Gamma_h_facets = facets_tags.indices[np.where(facets_tags.values == 4)]
-
-    mesh.topology.create_connectivity(fdim, cdim)
-    mesh.topology.create_connectivity(cdim, fdim)
-
-    f2c_connect = mesh.topology.connectivity(fdim, cdim)
-    c2f_connect = mesh.topology.connectivity(cdim, fdim)
-
-    num_facets_per_cell = len(c2f_connect.links(0))
-
-    c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
-    f2c_map = reshape_facets_map(f2c_connect)
-    cells_connected_to_Gamma_h = np.unique(np.argsort(np.ndarray.flatten(f2c_map[Gamma_h_facets])))
-    facets_connected_to_Gamma_h = np.unique(np.argsort(np.ndarray.flatten(c2f_map[cells_connected_to_Gamma_h])))
-    facets_Omega_h = facets_tags.indices[np.where(np.logical_or(facets_tags.values == 1, facets_tags.values == 2, facets_tags.values == 4))]
-    return np.union1d(facets_Omega_h, facets_connected_to_Gamma_h)

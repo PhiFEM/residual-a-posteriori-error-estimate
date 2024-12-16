@@ -10,7 +10,7 @@ The docker image is based on FEniCSx.
 It contains also some python libraries dependencies.
 
 ## Build the image:
-Replace `YOUR_ENGINE_HERE` by `docker`, `podman` or your favorite container engine.
+Replace `YOUR_ENGINE_HERE` by `docker`, `podman` or your favorite container engine (with similar commands as Docker).
 ```bash
 export CONTAINER_ENGINE="YOUR_ENGINE_HERE"
 ${CONTAINER_ENGINE} login
@@ -24,9 +24,20 @@ sudo -E bash run_image.sh
 ```
 
 ## Run an example (inside the container from the root directory):
+The `main.py` scripts have the following parameters:
 ```bash
-cd phiFEM/homogeneous_dirichlet/
-python3 main.py
+python3 main.py SOLVER SIZE_INIT_MESH NUM_REF_STEPS REFINEMENT_MODE
+```
+where
+- `SOLVER` defines the FE solver (`str` among `FEM` or `phiFEM`),
+- `SIZE_INIT_MESH` defines the size of the initial mesh (`float`),
+- `NUM_REF_STEPS` defines the number of refinement steps (`int`),
+- `REFINEMENT_MODE` defines the refinement strategy to use (`str` among `uniform` or `adaptive`).
+
+Example:
+```bash
+cd demo/homogeneous_dirichlet/
+python3 main.py phiFEM 0.1 25 adaptive
 ```
 
 ## Launch unit tests (inside the container from the root directory):

@@ -1,5 +1,6 @@
 import dolfinx as dfx
 from dolfinx.io import XDMFFile
+from lxml import etree
 from mpi4py import MPI
 import meshio
 import numpy as np
@@ -7,14 +8,24 @@ import pygmsh as pg
 import pytest
 import os
 
-from utils.compute_meshtags import tag_entities
-from utils.classes import Levelset
-from utils.mesh_scripts import (reshape_facets_map,
-                                compute_outward_normal)
+from phiFEM.src.compute_meshtags import tag_entities
+from phiFEM.src.continuous_functions import Levelset
+from phiFEM.src.mesh_scripts import (reshape_facets_map,
+                                     compute_outward_normal)
 
 parent_dir = os.path.dirname(__file__)
 
-def create_mesh(mesh_path, lcar):
+def create_square(mesh_path, lcar):
+    mesh_corners = np.array([[-1.5, -1.5],
+                             [1.5, 1.5]])
+    nx = int(np.abs(mesh_corners[1][0] - mesh_corners[0][0]) * np.sqrt(2.) / lcar)
+    ny = int(np.abs(mesh_corners[1][1] - mesh_corners[0][1]) * np.sqrt(2.) / lcar)
+    mesh = dfx.mesh.create_rectangle(MPI.COMM_WORLD, mesh_corners, [nx, ny])
+
+    with XDMFFile(mesh.comm, os.path.join("tests_data", "square.xdmf"), "w") as of:
+        of.write_mesh(mesh)
+
+def create_disk(mesh_path, lcar):
     with pg.geo.Geometry() as geom:
         # Points
         p1 = geom.add_point([0.,   0., 0.], lcar)
@@ -29,17 +40,25 @@ def create_mesh(mesh_path, lcar):
         lloop = geom.add_curve_loop([c1, c2])
         surf = geom.add_plane_surface(lloop)
 
-        mesh = geom.generate_mesh()
+        mesh = geom.generate_mesh(dim=2, algorithm=6)
 
-        mesh.points = mesh.points[:, :2]
+    mesh.points = mesh.points[:, :2]
 
-        for cell in mesh.cells:
-            if cell.type == 'triangle':
-                triangle_cells = cell.data
+    for cell_block in mesh.cells:
+        if cell_block.type == 'triangle':
+            triangle_cells = [("triangle", cell_block.data)]
 
-        meshio.write(os.path.join(parent_dir, "tests_data", "disk.xdmf"),     
-                     meshio.Mesh(points = mesh.points,
-                                 cells={"triangle": triangle_cells}))
+    meshio.write_points_cells(mesh_path, mesh.points, triangle_cells)
+
+    # meshio and dolfinx use incompatible Grid names ("Grid" for meshio and "mesh" for dolfinx)
+    # the lines below change the Grid name from "Grid" to "mesh" to ensure the compatibility between meshio and dolfinx.
+    tree = etree.parse(mesh_path)
+    root = tree.getroot()
+
+    for grid in root.findall(".//Grid"):
+        grid.set("Name", "mesh")
+    
+    tree.write(mesh_path, pretty_print=True, xml_declaration=True, encoding="UTF-8")
 
 def rotation(angle, x):
     return (np.cos(angle)*x[0] + np.sin(angle)*x[1], -np.sin(angle)*x[0] + np.cos(angle)*x[1])
@@ -48,27 +67,41 @@ def rotation(angle, x):
 Dara_n° = ("Data name", "mesh name", levelset object, "cells benchmark name", "facets benchmark name")
 """
 data_1 = ("Circle radius 1", "disk", Levelset(lambda x, y: x**2 + y**2 - 0.125))
-data_2 = ("Square", "square", Levelset(lambda x, y: np.exp(-1./(np.abs(rotation(np.pi/6. - np.pi/4., [x, y])[0])+np.abs(rotation(np.pi/6. - np.pi/4., [x, y])[1]))) - np.exp(-0.75)))
+
+def levelset_2(x, y):
+    def fct(x, y):
+        return np.sum(np.abs(rotation(np.pi/6. - np.pi/4., [x, y])), axis=0)
+    return fct(x, y) - np.sqrt(2.)/2.
+
+data_2 = ("Square", "square", Levelset(levelset_2))
 
 testdata = [data_1, data_2]
 
 @pytest.mark.parametrize("data_name, mesh_name, levelset", testdata)
-def test_outward_normal(data_name, mesh_name, levelset):
+def test_outward_normal(data_name, mesh_name, levelset, save_normal=False):
     mesh_path = os.path.join(parent_dir, "tests_data", mesh_name + ".xdmf")
 
     if not os.path.isfile(mesh_path):
         print(f"{mesh_path} not found, we create it.")
-        create_mesh(mesh_path, 0.1)
+        if mesh_name=="disk":
+            create_disk(mesh_path, 0.1)
+        elif mesh_name=="square":
+            create_square(mesh_path, 0.1)
     
-    with XDMFFile(MPI.COMM_WORLD, os.path.join(parent_dir, "tests_data", "disk.xdmf"), "r") as fi:
-        mesh = fi.read_mesh(name="Grid")
+    with XDMFFile(MPI.COMM_WORLD, os.path.join(parent_dir, "tests_data", mesh_name + ".xdmf"), "r") as fi:
+        mesh = fi.read_mesh()
     
     cdim = mesh.topology.dim
     fdim = mesh.topology.dim - 1
 
-    cells_tags = tag_entities(mesh, levelset, cdim)
-    facets_tags = tag_entities(mesh, levelset, fdim, cells_tags=cells_tags)
-    w0 = compute_outward_normal(mesh, [cells_tags, facets_tags], levelset)
+    cells_tags  = tag_entities(mesh, levelset, cdim, plot=True)
+    facets_tags = tag_entities(mesh, levelset, fdim, cells_tags=cells_tags, plot=True)
+    w0 = compute_outward_normal(mesh, levelset)
+
+    if save_normal:
+        with XDMFFile(mesh.comm, "./normal.xdmf", "w") as of:
+            of.write_mesh(mesh)
+            of.write_function(w0)
 
     W0 = w0.function_space
 
@@ -94,7 +127,7 @@ def test_outward_normal(data_name, mesh_name, levelset):
         inner_pdct = np.inner(vec_facet, val_normal)
         
         # Check that the gradient from the levelset is orthogonal to the boundary facet
-        assert np.isclose(inner_pdct, 0.)
+        assert np.isclose(inner_pdct, 0.), f"inner_pdct = {inner_pdct}"
 
         coords = mesh.geometry.x
         cell_vertices = mesh.topology.connectivity(cdim, 0).links(neighbor_inside_cell[0])
@@ -109,7 +142,7 @@ def test_outward_normal(data_name, mesh_name, levelset):
 
         # Check that the gradient is normalized
         norm = np.sqrt(np.inner(val_normal, val_normal))
-        assert np.isclose(norm, 1.)
+        assert np.isclose(norm, 1.), f"||normal|| = {norm}"
 
 if __name__=="__main__":
-    test_outward_normal("0", "disk", Levelset(lambda x, y: x**2 + y**2 - 0.125))
+    test_outward_normal(*data_2, save_normal=True)
