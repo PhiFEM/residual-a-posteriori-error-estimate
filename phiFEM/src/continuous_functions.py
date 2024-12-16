@@ -1,5 +1,5 @@
 import dolfinx as dfx
-from phiFEM.src.derivatives import negative_laplacian, compute_gradient
+from phiFEM.src.derivatives import negative_laplacian
 
 
 class ContinuousFunction:
