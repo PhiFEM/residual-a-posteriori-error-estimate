@@ -3,9 +3,9 @@ import os
 import pandas as pd
 
 class ResultsSaver:
-    def __init__(self, output_path, data_keys):
+    def __init__(self, output_path):
         self.output_path = output_path
-        self.results = {key: [] for key in data_keys}
+        self.results = {}
 
         if not os.path.isdir(output_path):
 	        print(f"{output_path} directory not found, we create it.")
@@ -16,23 +16,23 @@ class ResultsSaver:
 	        print(f"{output_functions_path} directory not found, we create it.")
 	        os.mkdir(output_functions_path)
         
-    def save_values(self, values, prnt=False):
-        for key, val in zip(self.results.keys(), values):
-            self.results[key].append(val)
-        
-        self.dataframe = pd.DataFrame(self.results)
-        self.dataframe.to_csv(os.path.join(self.output_path, "results.csv"))
-        if prnt:
-            print(self.dataframe)
-    
-    def add_new_values(self, new_dict, prnt=False):
-        self.dataframe = self.dataframe.assign(**new_dict)
-        self.dataframe.to_csv(os.path.join(self.output_path, "results.csv"))
-        if prnt:
-            print(self.dataframe)
+    def add_new_value(self, key, value, prnt=False):
+        if key in self.results.keys():
+            self.results[key].append(value)
+        else:
+            self.results[key] = [value]
     
     def save_function(self, function, file_name):
         mesh = function.function_space.mesh
         with XDMFFile(mesh.comm, os.path.join(self.output_path, "functions",  file_name + ".xdmf"), "w") as of:
             of.write_mesh(mesh)
             of.write_function(function)
+
+    def save_mesh(self, mesh, file_name):
+        with XDMFFile(mesh.comm, os.path.join(self.output_path, "meshes",  file_name + ".xdmf"), "w") as of:
+            of.write_mesh(mesh)
+    
+    def save_values(self, file_name):
+        df = pd.DataFrame(self.results)
+        df.to_csv(os.path.join(self.output_path, file_name))
+        print(df)
