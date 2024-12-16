@@ -5,10 +5,6 @@ from phiFEM.src.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_diric
 
 parent_dir = os.path.split(os.path.abspath(__file__))[0]
 
-def cprint(str2print, print_save=True, file=None):
-    if print_save:
-        print(str2print, file=file)
-
 tilt_angle = np.pi/6. + np.pi/2.
 shift = np.array([np.pi/32., np.pi/32.])
 
@@ -51,12 +47,14 @@ if __name__=="__main__":
     parser.add_argument("solver", type=str, choices=["FEM", "phiFEM"])
     parser.add_argument("char_length", type=float)
     parser.add_argument("num_it", type=int)
-    parser.add_argument("ref_mode", type=str, choices=["uniform", "adaptive"])
+    parser.add_argument("ref_mode", type=str, choices=["uniform", "H10", "L2"])
+    parser.add_argument("--exact_error", default=False, action='store_true', help="Compute the exact errors.")
     args = parser.parse_args()
     solver = args.solver
     cl = args.char_length
     num_it = args.num_it
     ref_method = args.ref_mode
+    compute_exact_errors = args.exact_error
 
     output_dir = os.path.join(parent_dir, "output_" + solver, ref_method)
 
@@ -69,7 +67,7 @@ if __name__=="__main__":
                                  bg_mesh_corners=[np.array([-1., -1.]),
                                                   np.array([ 1.,  1.])],
                                  ref_method=ref_method,
-                                 compute_exact_error=True)
+                                 compute_exact_error=compute_exact_errors)
     
     if solver=="FEM":
         point_1 = rotation(- tilt_angle, np.array([0.,  0.]) * 0.5) + shift
@@ -87,4 +85,5 @@ if __name__=="__main__":
                               expression_rhs=expression_rhs,
                               quadrature_degree=4,
                               ref_method=ref_method,
-                              geom_vertices=geom_vertices)
+                              geom_vertices=geom_vertices,
+                              compute_exact_error=compute_exact_errors)

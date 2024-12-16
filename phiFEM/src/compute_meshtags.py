@@ -1,6 +1,8 @@
 import dolfinx as dfx
 from dolfinx import cpp
+import matplotlib.pyplot as plt
 import numpy as np
+from phiFEM.src.mesh_scripts import plot_mesh_tags
 
 # TODO: Modify to use in parallel
 
@@ -51,7 +53,8 @@ def tag_entities(mesh,
                  levelset,
                  edim,
                  cells_tags=None,
-                 padding=False):
+                 padding=False,
+                 plot=False):
     """ Compute the entity tags for the interior (Omega_h) and the cut (set of cells having a non empty intersection with Gamma_h).
     Tag = 1: interior strict (Omega_h \ Omega_Gamma_h)
     Tag = 2: cut (Omega_Gamma_h)
@@ -107,7 +110,7 @@ def tag_entities(mesh,
                  cut_facets,
                  exterior_facets,
                  boundary_facets]
-        
+
         assert len(interior_facets) > 0, "No interior facets (1) tagged!"
         assert len(cut_facets)      > 0, "No cut facets (2) tagged!"
         assert len(boundary_facets) > 0, "No boundary facets (4) tagged!"
@@ -127,9 +130,18 @@ def tag_entities(mesh,
     entities_markers = np.hstack(list_markers).astype(np.int32)
 
     sorted_indices = np.argsort(entities_indices)
-
+ 
     entities_tags = dfx.mesh.meshtags(mesh,
                                       edim,
                                       entities_indices[sorted_indices],
                                       entities_markers[sorted_indices])
+    
+    if plot:
+        figure, ax = plt.subplots()
+        plot_mesh_tags(mesh, entities_tags, ax=ax, display_indices=False, expression_levelset=levelset.expression)
+        if edim == mesh.topology.dim:
+            ename = "cells"
+        else:
+            ename = "facets"
+        plt.savefig(f"./{ename}_tags.svg", format="svg", dpi=2400)
     return entities_tags
