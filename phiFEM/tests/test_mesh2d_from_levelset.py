@@ -41,6 +41,7 @@ def expression_3(x, y):
     vertical_leg = np.maximum(horizontal_leg,
                               -rotated[0] - np.full_like(x, 0.5))
     return vertical_leg
+
 geom_vertices_3 = np.array([[0.,    0.],
                             [0.,  -0.5],
                             [0.5, -0.5],
