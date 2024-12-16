@@ -14,7 +14,19 @@ from phiFEM.src.continuous_functions import ExactSolution
 from phiFEM.src.mesh_scripts import compute_outward_normal
 
 class GenericSolver:
+    """ Class representing a generic solver."""
+
     def __init__(self, mesh, FE_element, PETSc_solver, ref_strat="uniform", num_step=0, save_output=True):
+        """ Initialize a solver.
+
+        Args:
+            mesh: dolfinx.mesh.Mesh, the initial mesh on which the PDE is solved.
+            FE_element: basix.ufl.element, the finite element used to approximate the PDE solution.
+            PETSc_solver: petsc4py.PETSc.KSP, the PETSc solver used to solve the finite element linear system.
+            ref_strat: (optional) str, the refinement strategy ('uniform' for uniform refinement, 'H10' for adaptive refinement based on the H10 residual estimator, 'L2' for adaptive refinement based on the L2 residual estimator).
+            num_step: (optional) int, refinement iteration number.
+            save_output: (optional) bool, if True, save the functions, meshes and values to the disk.
+        """
         self.A             = None
         self.b             = None
         self.bilinear_form = None
@@ -33,10 +45,16 @@ class GenericSolver:
         self.solver_type   = "Generic"
     
     def set_data(self, source_term):
+        """ Set the source term data.
+
+        Args:
+            source_term: ContinuousFunction object, the right-hand side data (force term).
+        """
         assert source_term.expression is not None, "The RHS has no expression."
         self.rhs = source_term
     
     def assemble(self):
+        """ Assemble the linear system."""
         self.print("Assemble linear system.")
 
         self.A = assemble_matrix(self.bilinear_form, bcs=self.bcs)
@@ -46,10 +64,12 @@ class GenericSolver:
         dfx.fem.set_bc(self.b, self.bcs)
     
     def print(self, str2print):
+        """ Print the state of the solver."""
         if self.save_output:
             print(f"Solver: {self.solver_type}. Refinement: {self.ref_strat}. Iteration n° {str(self.i).zfill(2)}. {str2print}")
     
     def solve(self):
+        """ Solve the FE linear system."""
         self.print("Solve linear system.")
 
         self.solution = dfx.fem.Function(self.FE_space)
@@ -64,6 +84,17 @@ class GenericSolver:
                             ref_degree=2,
                             padding=1.e-14,
                             reference_mesh_path=None):
+        """ Compute reference approximations to the exact errors in H10 and L2 norms.
+
+        Args:
+            results_saver: Saver object, the saver.
+            expression_u_exact: (optional) method, the expression of the exact solution (if None, a reference solution is computed on a finer reference mesh).
+            save_output: (optional) bool, if True, save the functions, meshes and values to the disk.
+            extra_ref: (optional) int, the number of extra uniform refinements to get the reference mesh.
+            ref_degree: (optional) int, the degree of the finite element used to compute the approximations to the exact errors.
+            padding: (optional) float, padding for non-matching mesh interpolation.
+            reference_mesh_path: (optional) os.Path object or str, the path to the reference mesh.
+        """
         self.print("Compute exact errors.")
 
         output_dir = results_saver.output_path
@@ -182,6 +213,11 @@ class GenericSolver:
             results_saver.save_function(H10_error_0, f"H10_error_{str(self.i).zfill(2)}")
     
     def marking(self, theta=0.3):
+        """ Perform maximum marking strategy.
+
+        Args:
+            theta: (optional) float, the marking parameter (select the cells with the 100*theta% highest estimator values).
+        """
         self.print("Mark mesh.")
 
         if self.ref_strat=="H10":
@@ -217,7 +253,19 @@ class GenericSolver:
 
 # TODO: keep the connectivities as class objects to avoid unnecessary multiple computations.
 class PhiFEMSolver(GenericSolver):
+    """ Class representing a phiFEM solver as a GenericSolver object."""
     def __init__(self, bg_mesh, FE_element, PETSc_solver, ref_strat="uniform", levelset_element=None, num_step=0, save_output=True):
+        """ Initialize a phiFEM solver object.
+
+        Args:
+            bg_mesh: dolfinx.mesh.Mesh object, the background mesh.
+            FE_element: basix.ufl.element object, the finite element used in the phiFEM discretization.
+            PETSc_solver: petsc4py.PETSc.KSP object, the PETSc solver used to solve the finite element linear system.
+            ref_strat: (optional) str, the refinement strategy ('uniform' for uniform refinement, 'H10' for adaptive refinement based on the H10 residual estimator, 'L2' for adaptive refinement based on the L2 residual estimator).
+            levelset_element: (optional) basix.ufl.element, the finite element used to discretize the levelset function.
+            num_step: (optional) int, the refinement step number.
+            save_output: (optional) bool, if True, save the functions, meshes and values to the disk.
+        """
         super().__init__(bg_mesh,
                          FE_element,
                          PETSc_solver,
@@ -240,11 +288,24 @@ class PhiFEMSolver(GenericSolver):
         self.v0                 = None
 
     def _compute_normal(self, mesh):
+        """ Private method used to compute the outward normal to Omega_h.
+
+        Args:
+            mesh: the mesh.
+        
+        Returns:
+            The outward normal field as a dolfinx.fem.Function.
+        """
         return compute_outward_normal(mesh, self.levelset)
 
     def _transfer_cells_tags(self, cmap):
-        cdim = self.submesh.topology.dim
+        """ Private method used to transfer the cells tags from the background mesh to the submesh.
 
+        Args:
+            cmap: ndarray, background cells to submesh cells indices map.
+        """
+
+        cdim = self.submesh.topology.dim
         # TODO: change this line to allow parallel computing
         bg_mesh_interior = self.bg_mesh_cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 1)]
         bg_cells_omega_h_gamma = self.bg_mesh_cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 2)]
@@ -272,22 +333,29 @@ class PhiFEMSolver(GenericSolver):
                                                     cells_markers[sorted_indices])
 
     def set_data(self, source_term, levelset):
+        """ Set the right-hand side source term (force term) and the levelset."""
         super().set_data(source_term)
         self.levelset = levelset
 
-    def mesh2mesh_interpolation(self, origin_mesh_fct, dest_mesh_fct):
-        # scatter_forward has to do with ghost cells in parallel (see: https://fenicsproject.discourse.group/t/the-usage-of-the-functions-of-dolfinx/13214/4)
-        origin_mesh_fct.x.scatter_forward()
-        # See: https://github.com/FEniCS/dolfinx/blob/e4439ccca81b976d11c6f606d9c612afcf010a31/python/test/unit/fem/test_interpolation.py#L790
-        mesh1_2_mesh2_nmm_data = dfx.fem.create_nonmatching_meshes_interpolation_data(
-                                      origin_mesh_fct.function_space.mesh._cpp_object,
-                                      origin_mesh_fct.function_space.element,
-                                      origin_mesh_fct.function_space.mesh._cpp_object)
-        dest_mesh_fct.interpolate(origin_mesh_fct, nmm_interpolation_data=mesh1_2_mesh2_nmm_data)
-        dest_mesh_fct.x.scatter_forward()
-        return dest_mesh_fct
+    # def mesh2mesh_interpolation(self, origin_mesh_fct, dest_mesh_fct):
+    #     # scatter_forward has to do with ghost cells in parallel (see: https://fenicsproject.discourse.group/t/the-usage-of-the-functions-of-dolfinx/13214/4)
+    #     origin_mesh_fct.x.scatter_forward()
+    #     # See: https://github.com/FEniCS/dolfinx/blob/e4439ccca81b976d11c6f606d9c612afcf010a31/python/test/unit/fem/test_interpolation.py#L790
+    #     mesh1_2_mesh2_nmm_data = dfx.fem.create_nonmatching_meshes_interpolation_data(
+    #                                   origin_mesh_fct.function_space.mesh._cpp_object,
+    #                                   origin_mesh_fct.function_space.element,
+    #                                   origin_mesh_fct.function_space.mesh._cpp_object)
+    #     dest_mesh_fct.interpolate(origin_mesh_fct, nmm_interpolation_data=mesh1_2_mesh2_nmm_data)
+    #     dest_mesh_fct.x.scatter_forward()
+    #     return dest_mesh_fct
 
     def compute_tags(self, padding=False, plot=False):
+        """ Compute the mesh tags.
+
+        Args:
+            padding: bool, if True, computes an extra padding layer of cells to increase the chances to keep the level 0 curve of the levelset inside the submesh.
+            plot: bool, if True, plots the mesh tags (very slow).
+        """
         super().print("Mesh tags computation.")
 
         working_mesh = self.mesh
@@ -308,6 +376,18 @@ class PhiFEMSolver(GenericSolver):
     def set_variational_formulation(self,
                                     sigma=1.,
                                     quadrature_degree=None):
+        """ Defines the variational formulation.
+
+        Args:
+            sigma: (optional) float, the phiFEM stabilization coefficient.
+            quadrature_degree: (optional) int, the degree of quadrature.
+        
+        Returns:
+            v0: dolfinx.fem.Function, the identity function of Omega_h.
+            dx: ufl.Measure, the surface measure with the cells tags.
+            dS: ufl.Measure, the facets measure with the facets tags.
+            num_dofs: int, the number of degrees of freedom used in the phiFEM approximation.
+        """
         super().print("Variational formulation set up.")
 
         if quadrature_degree is None:
@@ -412,6 +492,7 @@ class PhiFEMSolver(GenericSolver):
         return v0, dx, dS, num_dofs
     
     def solve(self):
+        """ Solve the phiFEM linear system."""
         super().solve()
         # TODO: to be fixed when levelset_space != FE_space
         phi_h = self.levelset.interpolate(self.levelset_space)
@@ -420,6 +501,13 @@ class PhiFEMSolver(GenericSolver):
         self.solution.x.array[:] = wh.x.array * phi_h.x.array
     
     def estimate_residual(self, V0=None, quadrature_degree=None, boundary_term=False):
+        """ Compute the local and global contributions of the residual a posteriori error estimators for the H10 and L2 norms.
+
+        Args:
+            V0: (optional) dolfinx.fem.FunctionSpace, the function space in which the local contributions of the residual estimators are interpolated.
+            quadrature_degree: (optional) int, the quadrature degree used in the integrals of the residual estimator.
+            boundary_term: (optional) bool, if True, the boundary term inner(inner(uh, n), w0) * ds is added to the residual estimator.
+        """
         super().print("Compute estimators.")
 
         uh = self.solution
@@ -500,7 +588,18 @@ class PhiFEMSolver(GenericSolver):
     
 
 class FEMSolver(GenericSolver):
+    """ Class representing a FEM solver as a GenericSolver object."""
     def __init__(self, mesh, FE_element, PETSc_solver, ref_strat="uniform", num_step=0, save_output=True):
+        """ Initialize a FEM solver object.
+
+        Args:
+            mesh: dolfinx.mesh.Mesh object, the conformal mesh.
+            FE_element: basix.ufl.element object, the finite element used in the phiFEM discretization.
+            PETSc_solver: petsc4py.PETSc.KSP object, the PETSc solver used to solve the finite element linear system.
+            ref_strat: (optional) str, the refinement strategy ('uniform' for uniform refinement, 'H10' for adaptive refinement based on the H10 residual estimator, 'L2' for adaptive refinement based on the L2 residual estimator).
+            num_step: (optional) int, the refinement step number.
+            save_output: (optional) bool, if True, save the functions, meshes and values to the disk.
+        """
         super().__init__(mesh,
                          FE_element,
                          PETSc_solver,
@@ -513,10 +612,19 @@ class FEMSolver(GenericSolver):
         self.mesh     = mesh
     
     def set_data(self, source_term, bcs=None):
+        """ Set the right-hand side source term (force term)."""
         super().set_data(source_term)
         self.bcs = bcs
     
     def set_variational_formulation(self, quadrature_degree=None):
+        """ Defines the variational formulation.
+
+        Args:
+            quadrature_degree: (optional) int, the degree of quadrature.
+        
+        Returns:
+            num_dofs: int, the number of degrees of freedom used in the FEM approximation.
+        """
         super().print("Set variational formulation.")
 
         if quadrature_degree is None:
@@ -547,6 +655,12 @@ class FEMSolver(GenericSolver):
         return num_dofs
 
     def estimate_residual(self, V0=None, quadrature_degree=None):
+        """ Compute the local and global contributions of the residual a posteriori error estimators for the H10 and L2 norms.
+
+        Args:
+            V0: (optional) dolfinx.fem.FunctionSpace, the function space in which the local contributions of the residual estimators are interpolated.
+            quadrature_degree: (optional) int, the quadrature degree used in the integrals of the residual estimator.
+        """
         super().print("Compute estimators.")
 
         if quadrature_degree is None:

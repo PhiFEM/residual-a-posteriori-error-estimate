@@ -70,6 +70,15 @@ def mesh2d_from_levelset(lc, levelset, level=0., bbox=np.array([[-1., 1.], [-1.,
     return boundary_vertices
 
 def compute_outward_normal(mesh, levelset):
+    """ Compute the outward normal to Omega_h.
+
+    Args:
+        mesh: the mesh on which the levelset is discretized.
+        levelset: the levelset defining Omega_h.
+    
+    Returns:
+        w0: the vector field defining the outward normal.
+    """
     # This function is used to define the unit outward pointing normal to Gamma_h
     CG1Element = element("Lagrange", mesh.topology.cell_name(), 1)
     V = dfx.fem.functionspace(mesh, CG1Element)
@@ -91,6 +100,14 @@ def compute_outward_normal(mesh, levelset):
     return w0
 
 def reshape_facets_map(f2c_connect):
+    """ Reshape the facets-to-cells indices mapping.
+
+    Args:
+        f2c_connect: the facets-to-cells connectivity.
+    
+    Returns:
+        The facets-to-cells mapping as a ndarray.
+    """
     f2c_array = f2c_connect.array
     num_cells_per_facet = np.diff(f2c_connect.offsets)
     max_cells_per_facet = num_cells_per_facet.max()
@@ -106,20 +123,20 @@ def reshape_facets_map(f2c_connect):
     f2c_map[mask, 1] = f2c_array[num_cells_per_facet.cumsum()[mask] - 1]
     return f2c_map
 
-def msh2xdmf_conversion_2D(msh_file_path, cell_type, prune_z=False):
-    mesh = meshio.read(msh_file_path)
-    cells = mesh.get_cells_type(cell_type)
-    cell_data = mesh.get_cell_data("gmsh:physical", cell_type)
-    points = mesh.points[:, :2] if prune_z else mesh.points
-    triangle_mesh = meshio.Mesh(points=points,
-                                cells={cell_type: cells},
-                                cell_data={"name_to_read": [cell_data.astype(np.int32)]})
-    path, name_ext = os.path.split(msh_file_path)
-    name = os.path.splitext(name_ext)[0]
-    meshio.write(os.path.join(path, name, ".xdmf"), triangle_mesh)
 
 def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False, expression_levelset=None):
-    """Plot a mesh tags object on the provied (or, if None, the current) axes object."""
+    """Plot a mesh tags object on the provied (or, if None, the current) axes object.
+    
+    Args:
+        mesh: the corresponding mesh.
+        mesh_tags: the mesh tags.
+        ax: (optional) the matplotlib axes.
+        display_indices: (optional) boolean, if True displays the indices of the cells/facets.
+        expression_levelset: (optional), if not None, display the contour line of the levelset.
+    
+    Returns:
+        A matplotlib axis with the corresponding plot.
+    """
     if ax is None:
         ax = plt.gca()
     ax.set_aspect("equal")
@@ -206,23 +223,3 @@ def plot_mesh_tags(mesh, mesh_tags, ax = None, display_indices=False, expression
 
         ax.contour(xx, yy, zz, [0.], linewidths=0.2)
     return ax
-
-def compute_facets_to_refine(mesh, facets_tags):
-    cdim = mesh.topology.dim
-    fdim = mesh.topology.dim - 1
-    Gamma_h_facets = facets_tags.indices[np.where(facets_tags.values == 4)]
-
-    mesh.topology.create_connectivity(fdim, cdim)
-    mesh.topology.create_connectivity(cdim, fdim)
-
-    f2c_connect = mesh.topology.connectivity(fdim, cdim)
-    c2f_connect = mesh.topology.connectivity(cdim, fdim)
-
-    num_facets_per_cell = len(c2f_connect.links(0))
-
-    c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
-    f2c_map = reshape_facets_map(f2c_connect)
-    cells_connected_to_Gamma_h = np.unique(np.argsort(np.ndarray.flatten(f2c_map[Gamma_h_facets])))
-    facets_connected_to_Gamma_h = np.unique(np.argsort(np.ndarray.flatten(c2f_map[cells_connected_to_Gamma_h])))
-    facets_Omega_h = facets_tags.indices[np.where(np.logical_or(facets_tags.values == 1, facets_tags.values == 2, facets_tags.values == 4))]
-    return np.union1d(facets_Omega_h, facets_connected_to_Gamma_h)

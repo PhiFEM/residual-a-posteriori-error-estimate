@@ -25,6 +25,23 @@ def poisson_dirichlet_phiFEM(cl,
                              save_output=True,
                              ref_method="uniform",
                              compute_exact_error=False):
+    """ Main loop of phiFEM solve and refinement for a Poisson-Dirichlet test case.
+
+    Args:
+        cl: float, the characteristic length of the initial mesh.
+        max_it: int, the maximum number of iterations.
+        expression_levelset: method, the expression of the levelset.
+        source_dir: Path object or str, the name of the test case source directory.
+        expression_rhs: (optional) method, the expression of the right-hand side term of the PDE (force term) (if None, it is computed from expression_u_exact).
+        expression_u_exact: (optional) method, the expression of the exact solution (if None and compute_exact_error=True, a reference solution is computed on a finer mesh).
+        bg_mesh_corners: (optional) (2,2) ndarray, the coordinates of vertices of the background mesh.
+        quadrature_degree: (optional) int, the degree of quadrature.
+        sigma_D: (optional) float, the phiFEM stabilization coefficient.
+        save_output: (optional) bool, if True, saves the functions, meshes and values on the disk.
+        ref_method: (optional) str, specify the refinement method (three choices: uniform for uniform refinement, H10 for adaptive refinement based on the H10 residual estimator, L2 for adaptive refinement based on the L2 residual estimator).
+        compute_exact_error: (optional) bool, if True compute the exact error on a finer reference mesh.
+    """
+        
     output_dir = os.path.join(source_dir, "output_phiFEM", ref_method)
 
     if save_output:
@@ -127,10 +144,24 @@ def poisson_dirichlet_FEM(cl,
                           expression_rhs=None,
                           expression_u_exact=None,
                           quadrature_degree=4,
-                          ref_method="uniform",
-                          geom_vertices=None,
                           save_output=True,
-                          compute_exact_error=False):
+                          ref_method="uniform",
+                          compute_exact_error=False,
+                          geom_vertices=None):
+    """ Main loop of FEM solve and refinement for a Poisson-Dirichlet test case.
+
+    Args:
+        cl: float, the characteristic length of the initial mesh.
+        max_it: int, the maximum number of iterations.
+        source_dir: Path object or str, the name of the test case source directory.
+        expression_rhs: (optional) method, the expression of the right-hand side term of the PDE (force term) (if None, it is computed from expression_u_exact).
+        expression_u_exact: (optional) method, the expression of the exact solution (if None and compute_exact_error=True, a reference solution is computed on a finer mesh).
+        quadrature_degree: (optional) int, the degree of quadrature.
+        save_output: (optional) bool, if True, saves the functions, meshes and values on the disk.
+        ref_method: (optional) str, specify the refinement method (three choices: uniform for uniform refinement, H10 for adaptive refinement based on the H10 residual estimator, L2 for adaptive refinement based on the L2 residual estimator).
+        compute_exact_error: (optional) bool, if True compute the exact error on a finer reference mesh.
+        geom_vertices: (optional) (N, 2) ndarray, vertices of the exact domain.
+    """
     output_dir = os.path.join(source_dir, "output_FEM", ref_method)
 
     if save_output:
