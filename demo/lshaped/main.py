@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import os
-from phiFEM.src.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_dirichlet_FEM
+from phiFEM.phifem.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_dirichlet_FEM
 
 parent_dir = os.path.split(os.path.abspath(__file__))[0]
 

@@ -8,10 +8,10 @@ import pygmsh as pg
 import pytest
 import os
 
-from phiFEM.src.compute_meshtags import tag_entities
-from phiFEM.src.continuous_functions import Levelset
-from phiFEM.src.mesh_scripts import (reshape_facets_map,
-                                     compute_outward_normal)
+from phiFEM.phifem.compute_meshtags import tag_entities
+from phiFEM.phifem.continuous_functions import Levelset
+from phiFEM.phifem.mesh_scripts import (reshape_facets_map,
+                                        compute_outward_normal)
 
 parent_dir = os.path.dirname(__file__)
 
@@ -94,8 +94,8 @@ def test_outward_normal(data_name, mesh_name, levelset, save_normal=False):
     cdim = mesh.topology.dim
     fdim = mesh.topology.dim - 1
 
-    cells_tags  = tag_entities(mesh, levelset, cdim, plot=True)
-    facets_tags = tag_entities(mesh, levelset, fdim, cells_tags=cells_tags, plot=True)
+    cells_tags  = tag_entities(mesh, levelset, cdim, plot=False)
+    facets_tags = tag_entities(mesh, levelset, fdim, cells_tags=cells_tags, plot=False)
     w0 = compute_outward_normal(mesh, levelset)
 
     if save_normal:

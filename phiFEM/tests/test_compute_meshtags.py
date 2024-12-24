@@ -2,8 +2,8 @@ from dolfinx.io import XDMFFile
 from mpi4py import MPI
 import numpy as np
 import pytest
-from phiFEM.src.compute_meshtags import tag_entities
-from phiFEM.src.continuous_functions import Levelset
+from phiFEM.phifem.compute_meshtags import tag_entities
+from phiFEM.phifem.continuous_functions import Levelset
 import os
 from test_outward_normal import create_disk
 
@@ -34,7 +34,6 @@ def test_compute_meshtags(data_name, mesh_name, levelset, cells_benchmark_name, 
     cells_tags = tag_entities(mesh,
                               levelset,
                               2)
-
     # Test computation of facets tags when cells tags are provided
     facets_tags = tag_entities(mesh,
                                levelset,

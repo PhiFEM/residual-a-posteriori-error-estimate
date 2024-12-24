@@ -2,7 +2,7 @@ import argparse
 import jax.numpy as jnp
 import numpy as np
 import os
-from phiFEM.src.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_dirichlet_FEM
+from phiFEM.phifem.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_dirichlet_FEM
 
 parent_dir = os.path.dirname(__file__)
 
@@ -23,23 +23,38 @@ def expression_u_exact(x, y):
 
 # Not required since jax will compute the negative laplacian of u_exact automatically but we add it since we know the analytical expression :)
 def expression_rhs(x, y):
-    return 8. * jnp.pi * jnp.sin(2. * jnp.pi * rotation(tilt_angle, [x, y])[0]) * \
-                         jnp.sin(2. * jnp.pi * rotation(tilt_angle, [x, y])[1])
+    return 8. * jnp.pi**2 * jnp.sin(2. * jnp.pi * rotation(tilt_angle, [x, y])[0]) * \
+                            jnp.sin(2. * jnp.pi * rotation(tilt_angle, [x, y])[1])
+
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser(prog="Sine-sine test case.",
                                      description="Run iterations of FEM or phiFEM with uniform or adaptive refinement.")
 
-    parser.add_argument("solver", type=str, choices=["FEM", "phiFEM"], help="Finite element solver.")
-    parser.add_argument("char_length", type=float, help="Size of the initial mesh.")
-    parser.add_argument("num_it", type=int, help="Number of refinement iterations.")
-    parser.add_argument("ref_mode", type=str, choices=["uniform", "H10", "L2"], help="Refinement strategy.")
-    parser.add_argument("--exact_error", default=False, action='store_true', help="Compute the exact errors.")
+    parser.add_argument("solver", 
+                        type=str,
+                        choices=["FEM", "phiFEM"],
+                        help="Finite element solver.")
+    parser.add_argument("char_length",
+                        type=float,
+                        help="Size of the initial mesh.")
+    parser.add_argument("num_it",
+                        type=int,
+                        help="Number of refinement iterations.")
+    parser.add_argument("ref_mode",
+                        type=str,
+                        choices=["uniform", "H10", "L2"],
+                        help="Refinement strategy.")
+    parser.add_argument("--exact_error",
+                        default=False,
+                        action='store_true',
+                        help="Compute the exact errors.")
+
     args = parser.parse_args()
-    solver = args.solver
-    cl = args.char_length
-    num_it = args.num_it
-    ref_method = args.ref_mode
+    solver               = args.solver
+    cl                   = args.char_length
+    num_it               = args.num_it
+    ref_method           = args.ref_mode
     compute_exact_errors = args.exact_error
 
     if solver=="phiFEM":
@@ -47,7 +62,6 @@ if __name__=="__main__":
                                  num_it,
                                  expression_levelset,
                                  parent_dir,
-                                 expression_rhs=expression_rhs,
                                  expression_u_exact=expression_u_exact,
                                  bg_mesh_corners=[np.array([-1., -1.]),
                                                   np.array([1., 1.])],
@@ -70,7 +84,6 @@ if __name__=="__main__":
                               expression_levelset,
                               parent_dir,
                               expression_rhs=expression_rhs,
-                              expression_u_exact=expression_u_exact,
                               quadrature_degree=4,
                               ref_method=ref_method,
                               geom_vertices=geom_vertices,

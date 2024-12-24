@@ -1,8 +1,8 @@
 import itertools
 import numpy as np
 import pytest
-from phiFEM.src.mesh_scripts import mesh2d_from_levelset
-from phiFEM.src.continuous_functions import Levelset
+from phiFEM.phifem.mesh_scripts import mesh2d_from_levelset
+from phiFEM.phifem.continuous_functions import Levelset
 
 """
 Data_n° = ("Fct formula", function of var x, y, geom_vertices (np.array shape (N,2)), bbox (np.array shape (2,2)))
@@ -86,3 +86,6 @@ def test_mesh2d_from_levelset(lc, data):
         assert np.isclose(err_max_to_boundary, 0.)
     except AssertionError:
         print(f"Error data {data_name}. Maximum error to the boundary:", err_max_to_boundary)
+
+if __name__=="__main__":
+    test_mesh2d_from_levelset(0.1, data_1)
