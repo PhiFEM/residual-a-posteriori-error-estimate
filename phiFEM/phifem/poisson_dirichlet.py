@@ -16,8 +16,8 @@ from phiFEM.phifem.saver import ResultsSaver
 from phiFEM.phifem.mesh_scripts import mesh2d_from_levelset
 
 PathStr = PathLike[str] | str
-NDArrayTuple = Tuple[npt.NDArray[np.float64], ...]
-NDArrayFunction = Callable[[NDArrayTuple], npt.NDArray[np.float64]]
+NDArrayTuple = Tuple[npt.NDArray[np.float64]]
+NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
 
 def poisson_dirichlet_phiFEM(cl: float,
                              max_it: int,

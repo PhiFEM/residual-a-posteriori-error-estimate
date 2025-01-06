@@ -1,6 +1,6 @@
 from dolfinx.mesh import Mesh, MeshTags
 import numpy.typing as npt 
-from phifem.continuous_functions import Levelset
+from phiFEM.phifem.continuous_functions import Levelset
 from typing import Any, Tuple
 
 # TODO: Modify to use in parallel

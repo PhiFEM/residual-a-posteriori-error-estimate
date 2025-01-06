@@ -5,51 +5,58 @@ from phiFEM.phifem.mesh_scripts import mesh2d_from_levelset
 from phiFEM.phifem.continuous_functions import Levelset
 
 """
-Data_n° = ("Fct formula", function of var x, y, geom_vertices (np.array shape (N,2)), bbox (np.array shape (2,2)))
+Data_n° = ("Fct formula", function of var x, geom_vertices (np.array shape (N,2)), bbox (np.array shape (2,2)))
 """
 # Tilted square
-def expression_1(x, y):
-    return np.abs(x) + np.abs(y) - np.ones_like(x)
-geom_vertices_1 = np.array([[1.,  0.], [0.,  1.], [-1., 0.], [0., -1.]])
-bbox_1 = np.array([[-1.1, 1.1],
-                   [-1.1, 1.1]])
+def expression_1(x):
+    return np.abs(x[0, :]) + np.abs(x[1, :]) - np.ones_like(x[0, :])
+geom_vertices_1 = np.array([[1., 0., -1., 0.],
+                            [0., 1., 0., -1.]])
+bbox_1 = np.array([[-1.1, -1.1],
+                   [ 1.1,  1.1]])
 
 # Unit circle
-def expression_2(x, y):
-    return x**2 + y**2 - np.ones_like(x)
-bbox_2 = np.array([[-1.1, 1.1],
-                   [-1.1, 1.1]])
+def expression_2(x):
+    return x[0, :]**2 + x[1, :]**2 - np.ones_like(x[0, :])
+bbox_2 = np.array([[-1.1, -1.1],
+                   [ 1.1,  1.1]])
 
-# Tilted L-shaped
-def expression_3(x, y):
-    x = x - np.full_like(x, np.pi/32.)
-    y = y - np.full_like(y, np.pi/32.)
+tilt_angle = np.pi/6. + np.pi/2.
 
-    angle = np.pi/6. + np.pi/2.
+def rotation(angle, x):
+    # Rotation matrix
     R = np.array([[ np.cos(angle), np.sin(angle)],
-                        [-np.sin(angle), np.cos(angle)]])
-    rotated = R.dot(np.array([x, y]))
+                    [-np.sin(angle), np.cos(angle)]])
+    rotated = R.dot(x)
+    return rotated
 
-    reetrant_corner = np.minimum(-1. * rotated[0],
-                                 -1. * rotated[1])
-    top_right_corner = np.maximum(rotated[0] - np.full_like(x, 0.5),
-                                  rotated[1] - np.full_like(x, 0.5))
-    corner = np.maximum(reetrant_corner,
-                        top_right_corner)
-    horizontal_leg = np.maximum(corner,
-                                -rotated[1] - np.full_like(x, 0.5))
-    vertical_leg = np.maximum(horizontal_leg,
-                              -rotated[0] - np.full_like(x, 0.5))
+def line(x, a, b, c):
+    rotated = rotation(tilt_angle, x)
+    return a*rotated[0] + b*rotated[1] + np.full_like(x[0, :], c)
+
+def expression_3(x):
+    val = x - np.full_like(x, np.pi/32.)
+    line_1 = line(val, -1.,  0.,   0.)
+    line_2 = line(val,  0., -1.,   0.)
+    line_3 = line(val,  1.,  0., -0.5)
+    line_4 = line(val,  0.,  1., -0.5)
+    line_5 = line(val,  0., -1., -0.5)
+    line_6 = line(val, -1.,  0., -0.5)
+
+    reentrant_corner = np.minimum(line_1, line_2)
+    top_right_corner = np.maximum(line_3, line_4)
+    corner           = np.maximum(reentrant_corner, top_right_corner)
+    horizontal_leg   = np.maximum(corner, line_5)
+    vertical_leg     = np.maximum(horizontal_leg, line_6)
     return vertical_leg
 
-geom_vertices_3 = np.array([[0.,    0.],
-                            [0.,  -0.5],
-                            [0.5, -0.5],
-                            [0.5,  0.5],
-                            [-0.5, 0.5],
-                            [-0.5,  0.]])
-bbox_3 = np.array([[-0.9, 0.3],
-                   [-0.7, 0.8]])
+geom_vertices_3_noshift = np.array([[0., 0.5, 0.5, -0.5, -0.5,   0.],
+                                    [0.,  0., 0.5,  0.5, -0.5, -0.5]])
+geom_vertices_3_rot = rotation(-np.pi/6., geom_vertices_3_noshift)
+geom_vertices_3 = geom_vertices_3_rot + np.pi/32.
+
+bbox_3 = np.array([[-0.9, -0.7],
+                   [ 0.3,  0.8]])
 
 data_1  = ("|x|+|y|-1",
            expression_1,
@@ -73,6 +80,29 @@ def test_mesh2d_from_levelset(lc, data):
     geom_vertices = data[2]
     bbox          = data[3]
 
+    x_min, x_max = -1., 1.
+    y_min, y_max = -1., 1.
+    nx = 1000
+    ny = 1000
+    xs = np.linspace(x_min, x_max, nx)
+    ys = np.linspace(y_min, y_max, ny)
+
+    xx, yy = np.meshgrid(xs, ys)
+    xx_rs = xx.reshape(xx.shape[0] * xx.shape[1])
+    yy_rs = yy.reshape(yy.shape[0] * yy.shape[1])
+    xxx = np.vstack([xx_rs, yy_rs])
+    zz_rs = data[1](xxx)
+    zz = zz_rs.reshape(xx.shape)
+
+
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+
+    ax.contour(xx, yy, zz, [0.], linewidths=0.2)
+    if geom_vertices is not None:
+        ax.scatter(geom_vertices[0, :], geom_vertices[1, :])
+    fig.savefig(f"{data_name}_{str(lc)}.png")
+
     boundary_vertices = mesh2d_from_levelset(lc,
                                              levelset,
                                              level=0.,
@@ -80,12 +110,10 @@ def test_mesh2d_from_levelset(lc, data):
                                              geom_vertices=geom_vertices,
                                              output_dir=None)
 
-    try:
-        # This test assumes that the levelset behaves like the distance to the boundary.
-        err_max_to_boundary = np.max(np.abs(levelset(boundary_vertices[:, 0], boundary_vertices[:, 1])))
-        assert np.isclose(err_max_to_boundary, 0.)
-    except AssertionError:
-        print(f"Error data {data_name}. Maximum error to the boundary:", err_max_to_boundary)
+    err_max_to_boundary = np.max(np.abs(levelset(boundary_vertices)))
+
+    # We check if the distance to the boundary is at most half of the characteristic length of the points cloud.
+    assert np.less(err_max_to_boundary/lc, 0.5), f"Error data {data_name}. Maximum relative error to the boundary: {err_max_to_boundary/lc}"
 
 if __name__=="__main__":
     test_mesh2d_from_levelset(0.1, data_1)

@@ -16,16 +16,18 @@ import numpy.typing as npt
 import os
 from   os import PathLike
 import pygmsh
-from   typing import cast, Tuple
+from   typing import cast
 import ufl
 from   ufl import inner, grad
+from   phiFEM.phifem.utils import immutable
 from   lxml import etree
 from   phiFEM.phifem.continuous_functions import Levelset
 
 PathStr = PathLike[str] | str
-NDArrayTuple = Tuple[npt.NDArray[np.float64], ...]
-NDArrayFunction = Callable[[NDArrayTuple], npt.NDArray[np.float64]]
 
+NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
+
+@immutable("geom_vertices")
 def mesh2d_from_levelset(lc: float,
                          levelset: Levelset,
                          level:float = 0.,
@@ -47,24 +49,31 @@ def mesh2d_from_levelset(lc: float,
         The coordinates of the boundary vertices.
     """
 
-    x = np.arange(bbox[0,0], bbox[0,1], step=lc/np.sqrt(2.), dtype=np.float64)
-    y = np.arange(bbox[1,0], bbox[1,1], step=lc/np.sqrt(2.), dtype=np.float64)
-    X, Y = np.meshgrid(x, y, indexing="ij")
-    X_flat, Y_flat = X.flatten(), Y.flatten()
-    Z_flat = levelset(X_flat, Y_flat)
-    Z = np.reshape(Z_flat, X.shape)
-
     # TODO: is there a way to combine geom_vertices and contour generated vertices ?
     boundary_vertices: npt.NDArray[np.float64]
     if geom_vertices is None:
+        x = np.arange(bbox[0,0], bbox[1,0], step=lc/np.sqrt(2.), dtype=np.float64)
+        y = np.arange(bbox[0,1], bbox[1,1], step=lc/np.sqrt(2.), dtype=np.float64)
+        X, Y = np.meshgrid(x, y, indexing="ij")
+        X_flat, Y_flat = X.flatten(), Y.flatten()
+        arr = np.vstack([X_flat, Y_flat])
+        Z_flat = levelset(arr)
+        Z = np.reshape(Z_flat, X.shape)
         cg = contour_generator(x=X, y=Y, z=Z, name="threaded")
         boundary_vertices = cast(npt.NDArray[np.float64], cg.lines(0.)[0])
     else:
-        boundary_vertices = geom_vertices
+        if geom_vertices.shape[0] == 1:
+            boundary_vertices = np.vstack((geom_vertices, np.zeros_like(geom_vertices), np.zeros_like(geom_vertices)))
+        elif geom_vertices.shape[0] == 2:
+            boundary_vertices = np.vstack((geom_vertices, np.zeros_like(geom_vertices[0, :])))
+        elif geom_vertices.shape[0] == 3:
+            boundary_vertices = geom_vertices
+        else:
+            raise ValueError("The geometry vertices must have at most 3 coordinates, not more.")
     
     with pygmsh.geo.Geometry() as geom:
         # The boundary vertices are correctly ordered by matplotlib.
-        geom.add_polygon(boundary_vertices, mesh_size=lc)
+        geom.add_polygon(boundary_vertices.T, mesh_size=lc)
         # http://gmsh.info/doc/texinfo/gmsh.html#index-Mesh_002eAlgorithm
         # algorithm=9 for structured mesh (packing of parallelograms)
         mesh = geom.generate_mesh(dim=2, algorithm=6)
@@ -85,7 +94,8 @@ def mesh2d_from_levelset(lc: float,
             grid.set("Name", "mesh")
         
         tree.write(os.path.join(output_dir, f"{file_name}.xdmf"), pretty_print=True, xml_declaration=True, encoding="UTF-8")
-    return boundary_vertices
+    
+    return boundary_vertices.T
 
 def compute_outward_normal(mesh: Mesh, levelset: Levelset) -> Function:
     """ Compute the outward normal to Omega_h.

@@ -1,17 +1,18 @@
 from basix.ufl import _ElementBase
 from collections.abc import Callable
 import dolfinx as dfx
+from mypy_extensions import VarArg
 import numpy as np
 import numpy.typing as npt
 from typing import Tuple
 
-NDArrayTuple = Tuple[npt.NDArray[np.float64], ...]
-NDArrayFunction = Callable[[NDArrayTuple], npt.NDArray[np.float64]]
+
+NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]] | Callable[[VarArg(npt.NDArray[np.float64])], npt.NDArray[np.float64]]
 
 class ContinuousFunction:
     """ Class to represent a continuous (in the sense of non-discrete) function."""
 
-    def __init__(self, expression: NDArrayFunction_2D) -> None: ...
+    def __init__(self, expression: NDArrayFunction) -> None: ...
     
     def __call__(self, *args: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]: ...
     

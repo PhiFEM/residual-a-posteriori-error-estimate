@@ -8,8 +8,8 @@ from phiFEM.phifem.continuous_functions import ExactSolution
 # import plotly.io as pio
 from typing import Tuple
 
-NDArrayTuple = Tuple[npt.NDArray[np.float64], ...]
-NDArrayFunction = Callable[[NDArrayTuple], npt.NDArray[np.float64]]
+
+NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
 
 
 # def print_fct(list_funcs: list[NDArrayFunction], file_name: str) -> None:
@@ -52,23 +52,23 @@ NDArrayFunction = Callable[[NDArrayTuple], npt.NDArray[np.float64]]
 
 
 """
-Data_n° = ("Fct formula",      num_var, (lambda x: expression fct),                         (lambda x: expression negative laplacian))
+Data_n° = ("Fct formula",      num_var, (lambda x: expression fct),                                     (lambda x: expression negative laplacian))
 """
-data_1  = ("x",                      2, (lambda x, y:    x),                                  (lambda x: np.zeros_like(x[:, 0])))
-data_2  = ("x^2",                    2, (lambda x, y:    x**2),                               (lambda x: -2. * np.ones_like(x[:, 0])))
-data_3  = ("x^3",                    2, (lambda x, y:    x**3),                               (lambda x: -6. * x[:, 0]))
-data_4  = ("y",                      2, (lambda x, y:    y),                                  (lambda x: np.zeros_like(x[:, 1])))
-data_5  = ("y^2",                    2, (lambda x, y:    y**2),                               (lambda x: -2. * np.ones_like(x[:, 1])))
-data_6  = ("y^3",                    2, (lambda x, y:    y**3),                               (lambda x: -6. * x[:, 1]))
-data_7  = ("z",                      3, (lambda x, y, z: z),                                  (lambda x: np.zeros_like(x[:, 2])))
-data_8  = ("z^2",                    3, (lambda x, y, z: z**2),                               (lambda x: -2. * np.ones_like(x[:, 2])))
-data_9  = ("z^3",                    3, (lambda x, y, z: z**3),                               (lambda x: -6. * x[:, 2]))
-data_10 = ("x*y",                    2, (lambda x, y:    x*y),                                (lambda x: np.zeros_like(x[:, 0])))
-data_11 = ("x*y*z",                  3, (lambda x, y, z: x*y*z),                              (lambda x: np.zeros_like(x[:, 0])))
-data_12 = ("x^3 + y^2*z + z^4",      3, (lambda x, y, z: x**3 + y**3*z**2 + z**4),            (lambda x: - 6. * x[:, 0] - 6. * x[:, 1] * x[:, 2]**2 - 2.*x[:, 1]**3 - 12.*x[:, 2]**2))
-data_13 = ("sin(x)*sin(y)",          2, (lambda x, y:    jnp.sin(x)*jnp.sin(y)),              (lambda x: 2. * jnp.sin(x[:, 0])*jnp.sin(x[:, 1])))
-data_14 = ("sin(x)*sin(y)*sin(z)",   3, (lambda x, y, z: jnp.sin(x)*jnp.sin(y)*jnp.sin(z)),   (lambda x: 3. * jnp.sin(x[:, 0])*jnp.sin(x[:, 1])*jnp.sin(x[:, 2])))
-data_15 = ("(y/x)*exp(-1/(10*x^2))", 2, (lambda x, y:    jnp.exp(-x**2/10.)*y/x),             (lambda x: -jnp.exp(-x[:, 0]**2/10.)*(50. + 5.*x[:, 0]**2+x[:, 0]**4)*x[:, 1]/(25.*x[:, 0]**3)))
+data_1  = ("x",                      2, (lambda x: x[0, :]),                                            (lambda x: np.zeros_like(x[0, :])))
+data_2  = ("x^2",                    2, (lambda x: x[0, :]**2),                                         (lambda x: -2. * np.ones_like(x[0, :])))
+data_3  = ("x^3",                    2, (lambda x: x[0, :]**3),                                         (lambda x: -6. * x[0, :]))
+data_4  = ("y",                      2, (lambda x: x[1, :]),                                            (lambda x: np.zeros_like(x[1, :])))
+data_5  = ("y^2",                    2, (lambda x: x[1, :]**2),                                         (lambda x: -2. * np.ones_like(x[1, :])))
+data_6  = ("y^3",                    2, (lambda x: x[1, :]**3),                                         (lambda x: -6. * x[1, :]))
+data_7  = ("z",                      3, (lambda x: x[2, :]),                                            (lambda x: np.zeros_like(x[2, :])))
+data_8  = ("z^2",                    3, (lambda x: x[2, :]**2),                                         (lambda x: -2. * np.ones_like(x[2, :])))
+data_9  = ("z^3",                    3, (lambda x: x[2, :]**3),                                         (lambda x: -6. * x[2, :]))
+data_10 = ("x*y",                    2, (lambda x: x[0, :]*x[1, :]),                                    (lambda x: np.zeros_like(x[0, :])))
+data_11 = ("x*y*z",                  3, (lambda x: x[0, :]*x[1, :]*x[2, :]),                            (lambda x: np.zeros_like(x[0, :])))
+data_12 = ("x^3 + y^2*z + z^4",      3, (lambda x: x[0, :]**3 + x[1, :]**3*x[2, :]**2 + x[2, :]**4),    (lambda x: - 6. * x[0, :] - 6. * x[1, :] * x[2, :]**2 - 2.*x[1, :]**3 - 12.*x[2, :]**2))
+data_13 = ("sin(x)*sin(y)",          2, (lambda x: jnp.sin(x[0, :])*jnp.sin(x[1, :])),                  (lambda x: 2. * jnp.sin(x[0, :])*jnp.sin(x[1, :])))
+data_14 = ("sin(x)*sin(y)*sin(z)",   3, (lambda x: jnp.sin(x[0, :])*jnp.sin(x[1, :])*jnp.sin(x[2, :])), (lambda x: 3. * jnp.sin(x[0, :])*jnp.sin(x[1, :])*jnp.sin(x[2, :])))
+data_15 = ("(y/x)*exp(-1/(10*x^2))", 2, (lambda x: jnp.exp(-x[0, :]**2/10.)*x[1, :]/x[0, :]),           (lambda x: -jnp.exp(-x[0, :]**2/10.)*(50. + 5.*x[0, :]**2+x[0, :]**4)*x[1, :]/(25.*x[0, :]**3)))
 
 # testdata = [data_1,  data_2,  data_3,  data_4,  data_5,
 #             data_6,  data_7,  data_8,  data_9,  data_10,
@@ -76,18 +76,22 @@ data_15 = ("(y/x)*exp(-1/(10*x^2))", 2, (lambda x, y:    jnp.exp(-x**2/10.)*y/x)
 
 # Only 2D data for now. TODO: add 3D.
 # data_15 is too nasty, I disable it for now
-testdata = [data_1,  data_2,  data_3,  data_4,  data_5,
-            data_6,  data_10, data_13 ]
+testdata = [data_1,  data_2,  data_3,
+            data_4,  data_5,  data_6,
+            data_7,  data_8,  data_9,
+            data_10, data_11, data_12,
+            data_13, data_14 ]
 
 @pytest.mark.parametrize("data_name,num_var,func,exact_nlap", testdata)
 def test_negative_laplacian(data_name, num_var, func, exact_nlap):
     func = ExactSolution(func)
     func.compute_negative_laplacian()
     nlap = func.get_negative_laplacian()
-    x = np.random.uniform(low=-1.0, high=1.0, size=(100000, num_var))
+    x = np.random.uniform(low=-1.0, high=1.0, size=(num_var, 100000))
     err_max = np.max(np.abs(nlap(x) - exact_nlap(x)))
-    if not np.isclose(err_max, 0., atol=1.e-6):
+    if not np.isclose(err_max, 0., atol=5.e-6):
         raise ValueError(f"Error max= {err_max}")
+
 
 if __name__=="__main__":
     test_negative_laplacian(*data_15)

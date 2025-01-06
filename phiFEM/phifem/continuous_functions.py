@@ -5,10 +5,9 @@ import functools
 import numpy as np
 import numpy.typing as npt
 from   phiFEM.phifem.derivatives import negative_laplacian
-from   typing import Tuple
+from   phiFEM.phifem.utils import immutable
 
-NDArrayTuple = Tuple[npt.NDArray[np.float64], ...]
-NDArrayFunction = Callable[[NDArrayTuple], npt.NDArray[np.float64]]
+NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
 
 class ContinuousFunction:
     """ Class to represent a continuous (in the sense of non-discrete) function."""
@@ -19,7 +18,6 @@ class ContinuousFunction:
         Args:
             expression: a method giving the expression of the continuous function.
         """
-
         self.expression: NDArrayFunction = expression
         self.interpolations: dict[_ElementBase, Function] = {}
 
@@ -27,33 +25,26 @@ class ContinuousFunction:
         functools.update_wrapper(self, expression)
     
     # TODO: improve __call__ method to tackle both single vectorial argument AND single/multiple scalar arguments
-    def __call__(self, *args: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    @immutable("x")
+    def __call__(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """ Call the continuous function for computation.
 
         Args:
-            args: coordinates of the points in which the function is computed.
+            x: coordinates of the points in which the function is computed.
         
         Returns:
             The array of values of the function.
         """
-        # If only one arg is passed, we format it in order to pass it to expression
-        if len(args) == 1:
-            x = args[0]
-            min_shape = np.min(x.shape)
-            argmin_shape = np.argmin(x.shape)
-            # TODO: modify this to allow 3D data
-            if min_shape == 3:
-                min_shape = 2
-            
-            if argmin_shape==0:
-                val = self.expression(*[x[i,:] for i in range(min_shape)])
-            elif argmin_shape==1:
-                val = self.expression(*[x[:,i] for i in range(min_shape)])
-            else:
-                ValueError("Data shape is not compatible.")
-            return val
-        else:
-            return self.expression(*args)
+
+        ndim = x.ndim
+        if ndim > 2:
+            raise ValueError("The input (ndarray) dimension must be 2 at most.")
+        
+        shape = x.shape
+        if shape[0] > 3:
+            raise ValueError("The input (coordinates) dimension must be 3 at most.")
+
+        return self.expression(x)
 
     
     def interpolate(self, FE_space: FunctionSpace) -> Function:
@@ -69,7 +60,7 @@ class ContinuousFunction:
         element = FE_space.element
         if element not in self.interpolations.keys():
             interpolation = Function(FE_space)
-            interpolation.interpolate(self)
+            interpolation.interpolate(self.__call__)
             self.interpolations[element] = interpolation
         return self.interpolations[element]
             
@@ -86,7 +77,7 @@ class Levelset(ContinuousFunction):
         Return:
             lambda function taking a tuple of coordinates and returning a boolean 
         """
-        return lambda x: self(x[0], x[1]) > t + padding
+        return lambda x: self(x) > t + padding
     
     def interior(self, t: float, padding: float =0.) -> Callable[[npt.NDArray[np.float64]], npt.NDArray[np.bool_]]:
         """ Compute a lambda function determining if the point x is inside the domain defined by the isoline of level t.
@@ -98,7 +89,7 @@ class Levelset(ContinuousFunction):
         Return:
             lambda function taking a tuple of coordinates and returning a boolean 
         """
-        return lambda x: self(x[0], x[1]) < t - padding
+        return lambda x: self(x) < t - padding
     
 class ExactSolution(ContinuousFunction):
     """ Class to represent the exact solution of the PDE as a continuous function."""

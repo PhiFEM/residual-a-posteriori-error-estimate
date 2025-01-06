@@ -4,8 +4,8 @@ import numpy.typing as npt
 from   os import PathLike
 from typing import Tuple
 
-NDArrayTuple = Tuple[npt.NDArray[np.float64], ...]
-NDArrayFunction = Callable[[NDArrayTuple], npt.NDArray[np.float64]]
+
+NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
 
 def poisson_dirichlet_phiFEM(cl: float,
                              max_it: int,

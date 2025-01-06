@@ -25,8 +25,7 @@ from phiFEM.phifem.mesh_scripts import compute_outward_normal
 from phiFEM.phifem.saver import ResultsSaver
 
 PathStr = PathLike[str] | str
-NDArrayTuple = Tuple[npt.NDArray[np.float64], ...]
-NDArrayFunction = Callable[[NDArrayTuple], npt.NDArray[np.float64]]
+NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
 
 class GenericSolver:
     """ Class representing a generic solver."""
