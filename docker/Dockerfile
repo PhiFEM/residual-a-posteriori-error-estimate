@@ -23,5 +23,8 @@ RUN python3 -m pip install -U pip
 # meshio: create the conforming meshes
 # pygmsh: create the conforming meshes
 # lxml:   change the xdmf meshes names to make meshio compatible with dolfinx
-RUN pip install pandas jax meshio pygmsh lxml
+WORKDIR /app
+COPY requirements.txt /app/
+RUN pip install -r requirements.txt
 ENV PYTHONPATH="$PYTHONPATH:/home/dolfinx/shared/"
+ENV MYPYPATH="$MYPYPATH:/home/dolfinx/shared/phiFEM/stubs"
