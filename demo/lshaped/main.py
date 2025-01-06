@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import os
-from phiFEM.src.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_dirichlet_FEM
+from phiFEM.phifem.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_dirichlet_FEM
 
 parent_dir = os.path.split(os.path.abspath(__file__))[0]
 
@@ -19,9 +19,9 @@ def line(x, y, a, b, c):
     rotated = rotation(tilt_angle, [x, y])
     return a*rotated[0] + b*rotated[1] + np.full_like(x, c)
 
-def expression_levelset(x, y):
-    x_shift = x - np.full_like(x, shift[0])
-    y_shift = y - np.full_like(y, shift[1])
+def expression_levelset(x):
+    x_shift = x[0, :] - np.full_like(x[0, :], shift[0])
+    y_shift = x[1, :] - np.full_like(x[1, :], shift[1])
 
     line_1 = line(x_shift, y_shift, -1.,  0.,   0.)
     line_2 = line(x_shift, y_shift,  0., -1.,   0.)
@@ -37,8 +37,8 @@ def expression_levelset(x, y):
     vertical_leg     = np.maximum(horizontal_leg, line_6)
     return vertical_leg
 
-def expression_rhs(x, y):
-    return np.ones_like(x)
+def expression_rhs(x):
+    return np.ones_like(x[0, :])
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser(prog="L-shaped test case.",
@@ -77,7 +77,7 @@ if __name__=="__main__":
         point_5 = rotation(- tilt_angle, np.array([-1., 1.]) * 0.5) + shift
         point_6 = rotation(- tilt_angle, np.array([-1., 0.]) * 0.5) + shift
 
-        geom_vertices = np.vstack([point_1, point_2, point_3, point_4, point_5, point_6])
+        geom_vertices = np.vstack([point_1, point_2, point_3, point_4, point_5, point_6]).T
         poisson_dirichlet_FEM(cl,
                               num_it,
                               expression_levelset,
