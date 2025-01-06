@@ -1,45 +1,53 @@
 import dolfinx as dfx
+from dolfinx.mesh import Mesh, MeshTags
 from dolfinx import cpp
 import matplotlib.pyplot as plt
 import numpy as np
-from phiFEM.src.mesh_scripts import plot_mesh_tags
+import numpy.typing as npt 
+from phiFEM.phifem.mesh_scripts import plot_mesh_tags
+from phiFEM.phifem.continuous_functions import Levelset
+from typing import Any, Tuple
 
 # TODO: Modify to use in parallel
 
-def _select_entities(mesh, levelset, edim, padding=False):
+def _select_entities(mesh: Mesh,
+                     levelset: Levelset,
+                     edim: int,
+                     padding: bool =False) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32]] | Tuple[npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32]]:
     """ Compute the list of entities strictly inside Omega_h and the list of entities having a non-empty intersection with Gamma_h.
 
     Args:
         mesh: the background mesh.
         levelset: a Levelset object
         edim: the dimension of the entities.
+        padding: (optional) bool, select padding entities to increase the chances of the submesh to contain the exact boundary.
     
     Returns:
         Two lists of entities indices.
     """
     mesh.topology.create_connectivity(edim, edim)
     # List all entities of the mesh
-    entities = np.arange(mesh.topology.index_map(edim).size_global, dtype = np.int32) # TODO: change this line to allow parallel computing
+    entities: npt.NDArray[np.int32] = np.arange(mesh.topology.index_map(edim).size_global, dtype = np.int32) # TODO: change this line to allow parallel computing
 
     # List entities that are stricly included in Omega_h
-    list_interior_entities = dfx.mesh.locate_entities(mesh,
-                                                      edim,
-                                                      levelset.interior(0.))
+    list_interior_entities: npt.NDArray[Any] = dfx.mesh.locate_entities(mesh,
+                                                                        edim,
+                                                                        levelset.interior(0.))
 
     # List entities that are strictly excluded from Omega_h
-    exterior_entities = dfx.mesh.locate_entities(mesh,
-                                                 edim,
-                                                 levelset.exterior(0.))
+    exterior_entities: npt.NDArray[Any] = dfx.mesh.locate_entities(mesh,
+                                                                   edim,
+                                                                   levelset.exterior(0.))
 
     # List entities having a non-empty intersection with Omega_h
-    interior_entities = np.setdiff1d(entities, exterior_entities)
+    interior_entities: npt.NDArray[Any] = np.setdiff1d(entities, exterior_entities)
     # Cells case
     # List entities having a non-empty intersection with Gamma_h
-    cut_entities = np.setdiff1d(interior_entities, list_interior_entities)
+    cut_entities: npt.NDArray[Any] = np.setdiff1d(interior_entities, list_interior_entities)
 
-    padding_entities = []
+    padding_entities: npt.NDArray[Any] = np.asarray([])
     if padding:
-        hmax_cutcells = max(cpp.mesh.h(mesh._cpp_object, edim, cut_entities))
+        hmax_cutcells: float = max(cpp.mesh.h(mesh._cpp_object, edim, cut_entities))
         list_exterior_padding_entities = dfx.mesh.locate_entities(mesh,
                                                                   edim,
                                                                   levelset.exterior(0., padding=hmax_cutcells))
@@ -47,14 +55,16 @@ def _select_entities(mesh, levelset, edim, padding=False):
         padding_entities = np.setdiff1d(padding_interior_entities, np.union1d(interior_entities, cut_entities))
         exterior_entities = np.setdiff1d(exterior_entities, padding_entities)
 
-    return list_interior_entities, cut_entities, exterior_entities, padding_entities
+        return list_interior_entities, cut_entities, exterior_entities, padding_entities
+    else:
+        return list_interior_entities, cut_entities, exterior_entities
 
-def tag_entities(mesh,
-                 levelset,
-                 edim,
-                 cells_tags=None,
-                 padding=False,
-                 plot=False):
+def tag_entities(mesh: Mesh,
+                 levelset: Levelset,
+                 edim: int,
+                 cells_tags: MeshTags | None = None,
+                 padding: bool = False,
+                 plot: bool = False) -> MeshTags:
     """ Compute the entity tags for the interior (Omega_h) and the cut (set of cells having a non empty intersection with Gamma_h).
     Tag = 1: interior strict (Omega_h \ Omega_Gamma_h)
     Tag = 2: cut (Omega_Gamma_h)
@@ -66,21 +76,26 @@ def tag_entities(mesh,
         mesh: the background mesh.
         levelset: a Levelset object.
         edim: dimension of the entities.
-        cells_tags (Meshtags object): the cells tags (default: None).
+        cells_tags: the cells tags.
 
     Returns:
         A meshtags object.
     """
 
     # If cells_tags is not provided, we need to go through cells selection.
-    cdim = mesh.topology.dim
+    cdim: int = mesh.topology.dim
     if cells_tags is None:
-        interior_entities, cut_fronteer_entities, exterior_entities, padding_entities = _select_entities(mesh, levelset, cdim, padding=padding)
+        if padding:
+            interior_entities, cut_fronteer_entities, exterior_entities, padding_entities = _select_entities(mesh, levelset, cdim, padding=padding)
+        else:
+            interior_entities, cut_fronteer_entities, exterior_entities = _select_entities(mesh, levelset, cdim, padding=padding)
     else:
-        interior_entities     = cells_tags.indices[np.where(cells_tags.values == 1)]
-        cut_fronteer_entities = cells_tags.indices[np.where(cells_tags.values == 2)]
-        exterior_entities     = cells_tags.indices[np.where(cells_tags.values == 3)]
-        padding_entities      = cells_tags.indices[np.where(cells_tags.values == 4)]
+        interior_entities     = cells_tags.find(1)
+        cut_fronteer_entities = cells_tags.find(2)
+        exterior_entities     = cells_tags.find(3)
+        padding_entities      = cells_tags.find(4)
+    
+    lists: list[npt.NDArray[np.int32] | list[int]]
     if edim == mesh.topology.dim - 1:
         # Get the indices of facets belonging to cells in interior_entities and cut_fronteer_entities
         mesh.topology.create_connectivity(cdim, edim)
@@ -90,10 +105,15 @@ def tag_entities(mesh,
         c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
         interior_boundary_facets = np.intersect1d(c2f_map[interior_entities],
                                                   c2f_map[cut_fronteer_entities])
-        boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
-                                         np.union1d(c2f_map[exterior_entities], c2f_map[padding_entities]))
 
-        interior_fronteer_facets, cut_facets, exterior_facets, _ = _select_entities(mesh, levelset, edim)
+        if padding:
+            boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
+                                             np.union1d(c2f_map[exterior_entities], c2f_map[padding_entities]))
+        else:
+            boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
+                                             c2f_map[exterior_entities])
+
+        interior_fronteer_facets, cut_facets, exterior_facets = _select_entities(mesh, levelset, edim)
         interior_facets = np.setdiff1d(interior_fronteer_facets, interior_boundary_facets)
         cut_facets = np.union1d(cut_facets, interior_boundary_facets)
         exterior_facets = np.setdiff1d(exterior_facets, boundary_facets)
@@ -115,10 +135,16 @@ def tag_entities(mesh,
         assert len(cut_facets)      > 0, "No cut facets (2) tagged!"
         assert len(boundary_facets) > 0, "No boundary facets (4) tagged!"
     elif edim == mesh.topology.dim:
-        lists = [interior_entities,
-                 cut_fronteer_entities,
-                 exterior_entities,
-                 padding_entities]
+        if padding:
+            lists = [interior_entities,
+                     cut_fronteer_entities,
+                     exterior_entities,
+                     padding_entities]
+        else:
+            lists = [interior_entities,
+                     cut_fronteer_entities,
+                     exterior_entities]
+
 
         assert len(interior_entities)     > 0,  "No interior cells (1) tagged!"
         assert len(cut_fronteer_entities) > 0,  "No cut cells (2) tagged!"
@@ -143,5 +169,5 @@ def tag_entities(mesh,
             ename = "cells"
         else:
             ename = "facets"
-        plt.savefig(f"./{ename}_tags.svg", format="svg", dpi=2400)
+        plt.savefig(f"./{ename}_tags.svg", format="svg", dpi=2400, bbox_inches="tight")
     return entities_tags

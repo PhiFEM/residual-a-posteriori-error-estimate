@@ -1,30 +1,37 @@
-
 from   basix.ufl import element
+from   collections.abc import Callable
 import dolfinx as dfx
 from   dolfinx.io import XDMFFile
 from   mpi4py import MPI
 import numpy as np
+import numpy.typing as npt
 import os
-from   petsc4py import PETSc
+from   os import PathLike
+from   petsc4py.PETSc import Options, KSP
+from   typing import Tuple
 
-from phiFEM.src.solver import PhiFEMSolver, FEMSolver
-from phiFEM.src.continuous_functions import Levelset, ExactSolution, ContinuousFunction
-from phiFEM.src.saver import ResultsSaver
-from phiFEM.src.mesh_scripts import mesh2d_from_levelset
+from phiFEM.phifem.solver import PhiFEMSolver, FEMSolver
+from phiFEM.phifem.continuous_functions import Levelset, ExactSolution, ContinuousFunction
+from phiFEM.phifem.saver import ResultsSaver
+from phiFEM.phifem.mesh_scripts import mesh2d_from_levelset
 
-def poisson_dirichlet_phiFEM(cl,
-                             max_it,
-                             expression_levelset,
-                             source_dir,
-                             expression_rhs=None,
-                             expression_u_exact=None,
-                             bg_mesh_corners=[np.array([0., 0.]),
-                                              np.array([1., 1.])],
-                             quadrature_degree=4,
-                             sigma_D=1.,
-                             save_output=True,
-                             ref_method="uniform",
-                             compute_exact_error=False):
+PathStr = PathLike[str] | str
+NDArrayTuple = Tuple[npt.NDArray[np.float64]]
+NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
+
+def poisson_dirichlet_phiFEM(cl: float,
+                             max_it: int,
+                             expression_levelset: NDArrayFunction,
+                             source_dir: PathStr,
+                             expression_rhs: NDArrayFunction | None = None,
+                             expression_u_exact: NDArrayFunction | None = None,
+                             bg_mesh_corners: npt.NDArray[np.float64] = np.array([[0., 0.],
+                                                                                  [1., 1.]]),
+                             quadrature_degree: int = 4,
+                             sigma_D: float = 1.,
+                             save_output: bool = True,
+                             ref_method: str = "uniform",
+                             compute_exact_error: bool = False) -> None:
     """ Main loop of phiFEM solve and refinement for a Poisson-Dirichlet test case.
 
     Args:
@@ -41,7 +48,7 @@ def poisson_dirichlet_phiFEM(cl,
         ref_method: (optional) str, specify the refinement method (three choices: uniform for uniform refinement, H10 for adaptive refinement based on the H10 residual estimator, L2 for adaptive refinement based on the L2 residual estimator).
         compute_exact_error: (optional) bool, if True compute the exact error on a finer reference mesh.
     """
-        
+    
     output_dir = os.path.join(source_dir, "output_phiFEM", ref_method)
 
     if save_output:
@@ -50,14 +57,19 @@ def poisson_dirichlet_phiFEM(cl,
 
     phi = Levelset(expression_levelset)
 
-    if expression_u_exact is None:
-        assert expression_rhs is not None, "At least expression_rhs or expression_u_exact must not be None."
+    rhs: ContinuousFunction
+    if expression_rhs is not None:
         rhs = ContinuousFunction(expression_rhs)
-    else:
-        print("expression_u_exact passed, we compute the RHS from it.")
+    elif expression_u_exact is not None:
+        if expression_rhs is None:
+            print("We compute the RHS from expression_u_exact using JAX.")
         u_exact = ExactSolution(expression_u_exact)
         u_exact.compute_negative_laplacian()
+        if u_exact.nlap is None:
+            raise TypeError("u_exact.nlap is None.")
         rhs = u_exact.nlap
+    else:
+        raise ValueError("poisson_dirichlet_phiFEM need expression_rhs or expression_u_exact not to be None.")
 
     """
     Create initial mesh
@@ -79,31 +91,35 @@ def poisson_dirichlet_phiFEM(cl,
         CG1Element = element("Lagrange", working_mesh.topology.cell_name(), 1)
 
         # Parametrization of the PETSc solver
-        options = PETSc.Options()
+        options = Options()
         options["ksp_type"] = "cg"
         options["pc_type"] = "hypre"
         options["ksp_rtol"] = 1e-7
         options["pc_hypre_type"] = "boomeramg"
-        petsc_solver = PETSc.KSP().create(working_mesh.comm)
+        petsc_solver = KSP().create(working_mesh.comm)
         petsc_solver.setFromOptions()
 
         phiFEM_solver = PhiFEMSolver(working_mesh, CG1Element, petsc_solver, num_step=i, ref_strat=ref_method, save_output=save_output)
-        phiFEM_solver.set_data(rhs, phi)
+        phiFEM_solver.set_source_term(rhs)
+        phiFEM_solver.set_levelset(phi)
         phiFEM_solver.compute_tags(padding=True, plot=False)
         v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
         results_saver.add_new_value("dofs", num_dofs)
         phiFEM_solver.assemble()
         phiFEM_solver.solve()
-        uh = phiFEM_solver.solution
+        uh = phiFEM_solver.get_solution()
 
+        if phiFEM_solver.submesh is None:
+            raise TypeError("phiFEM_solver.submesh is None.")
+        
         working_mesh = phiFEM_solver.submesh
 
         V = dfx.fem.functionspace(working_mesh, CG1Element)
         phiV = phi.interpolate(V)
         phiFEM_solver.estimate_residual()
-        eta_h_H10 = phiFEM_solver.eta_h_H10
+        eta_h_H10 = phiFEM_solver.get_eta_h_H10()
         results_saver.add_new_value("H10 estimator", np.sqrt(sum(eta_h_H10.x.array[:])))
-        eta_h_L2 = phiFEM_solver.eta_h_L2
+        eta_h_L2 = phiFEM_solver.get_eta_h_L2()
         results_saver.add_new_value("L2 estimator", np.sqrt(sum(eta_h_L2.x.array[:])))
 
         # Save results
@@ -117,6 +133,7 @@ def poisson_dirichlet_phiFEM(cl,
 
         if compute_exact_error:
             phiFEM_solver.compute_exact_error(results_saver,
+                                              ref_degree= 1,
                                               expression_u_exact=expression_u_exact,
                                               save_output=save_output)
 
@@ -137,17 +154,17 @@ def poisson_dirichlet_phiFEM(cl,
         if save_output:
             print("\n")
     
-def poisson_dirichlet_FEM(cl,
-                          max_it,
-                          expression_levelset,
-                          source_dir,
-                          expression_rhs=None,
-                          expression_u_exact=None,
-                          quadrature_degree=4,
-                          save_output=True,
-                          ref_method="uniform",
-                          compute_exact_error=False,
-                          geom_vertices=None):
+def poisson_dirichlet_FEM(cl: float,
+                          max_it: int,
+                          expression_levelset: NDArrayFunction,
+                          source_dir: PathStr,
+                          expression_rhs: NDArrayFunction | None = None,
+                          expression_u_exact: NDArrayFunction | None = None,
+                          quadrature_degree: int = 4,
+                          save_output: bool = True,
+                          ref_method: str = "uniform",
+                          compute_exact_error: bool = False,
+                          geom_vertices: npt.NDArray[np.float64] | None = None) -> None:
     """ Main loop of FEM solve and refinement for a Poisson-Dirichlet test case.
 
     Args:
@@ -170,14 +187,18 @@ def poisson_dirichlet_FEM(cl,
 
     phi = Levelset(expression_levelset)
 
-    if expression_u_exact is None:
-        assert expression_rhs is not None, "At least expression_rhs or expression_u_exact must not be None."
+    rhs: ContinuousFunction
+    if expression_rhs is not None:
         rhs = ContinuousFunction(expression_rhs)
-    else:
+    elif expression_u_exact is not None:
         print("expression_u_exact passed, we compute the RHS from it.")
         u_exact = ExactSolution(expression_u_exact)
         u_exact.compute_negative_laplacian()
+        if u_exact.nlap is None:
+            raise TypeError("u_exact.nlap is None.")
         rhs = u_exact.nlap
+    else:
+        raise ValueError("poisson_dirichlet_FEM need expression_rhs or expression_u_exact not to be None.")
 
     """
     Generate conforming mesh
@@ -197,16 +218,17 @@ def poisson_dirichlet_FEM(cl,
         CG1Element = element("Lagrange", conforming_mesh.topology.cell_name(), 1)
 
         # Parametrization of the PETSc solver
-        options = PETSc.Options()
+        options = Options()
         options["ksp_type"] = "cg"
         options["pc_type"] = "hypre"
         options["ksp_rtol"] = 1e-7
         options["pc_hypre_type"] = "boomeramg"
-        petsc_solver = PETSc.KSP().create(conforming_mesh.comm)
+        petsc_solver = KSP().create(conforming_mesh.comm)
         petsc_solver.setFromOptions()
 
         FEM_solver = FEMSolver(conforming_mesh, CG1Element, petsc_solver, num_step=i, ref_strat=ref_method, save_output=save_output)
         
+        FEM_solver.set_source_term(rhs)
         dbc = dfx.fem.Function(FEM_solver.FE_space)
         facets = dfx.mesh.locate_entities_boundary(
                                 conforming_mesh,
@@ -214,17 +236,17 @@ def poisson_dirichlet_FEM(cl,
                                 lambda x: np.ones(x.shape[1], dtype=bool))
         dofs = dfx.fem.locate_dofs_topological(FEM_solver.FE_space, 1, facets)
         bcs = [dfx.fem.dirichletbc(dbc, dofs)]
-        FEM_solver.set_data(rhs, bcs=bcs)
+        FEM_solver.set_boundary_conditions(bcs)
         num_dofs = FEM_solver.set_variational_formulation()
         results_saver.add_new_value("dofs", num_dofs)
         FEM_solver.assemble()
         FEM_solver.solve()
-        uh = FEM_solver.solution
+        uh = FEM_solver.get_solution()
 
         FEM_solver.estimate_residual()
-        eta_h_H10 = FEM_solver.eta_h_H10
+        eta_h_H10 = FEM_solver.get_eta_h_H10()
         results_saver.add_new_value("H10 estimator", np.sqrt(sum(eta_h_H10.x.array[:])))
-        eta_h_L2 = FEM_solver.eta_h_L2
+        eta_h_L2 = FEM_solver.get_eta_h_L2()
         results_saver.add_new_value("L2 estimator", np.sqrt(sum(eta_h_L2.x.array[:])))
 
         # Save results
@@ -236,8 +258,10 @@ def poisson_dirichlet_FEM(cl,
 
         if compute_exact_error:
             FEM_solver.compute_exact_error(results_saver,
+                                           ref_degree=1,
                                            expression_u_exact=expression_u_exact,
-                                           save_output=save_output)
+                                           save_output=save_output,
+                                           save_exact_solution=True)
 
         # Marking
         if i < max_it - 1:

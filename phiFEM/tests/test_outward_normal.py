@@ -8,10 +8,10 @@ import pygmsh as pg
 import pytest
 import os
 
-from phiFEM.src.compute_meshtags import tag_entities
-from phiFEM.src.continuous_functions import Levelset
-from phiFEM.src.mesh_scripts import (reshape_facets_map,
-                                     compute_outward_normal)
+from phiFEM.phifem.compute_meshtags import tag_entities
+from phiFEM.phifem.continuous_functions import Levelset
+from phiFEM.phifem.mesh_scripts import (reshape_facets_map,
+                                        compute_outward_normal)
 
 parent_dir = os.path.dirname(__file__)
 
@@ -66,12 +66,12 @@ def rotation(angle, x):
 """
 Dara_n° = ("Data name", "mesh name", levelset object, "cells benchmark name", "facets benchmark name")
 """
-data_1 = ("Circle radius 1", "disk", Levelset(lambda x, y: x**2 + y**2 - 0.125))
+data_1 = ("Circle radius 1", "disk", Levelset(lambda x: x[0, :]**2 + x[1, :]**2 - 0.125 * np.ones_like(x[0, :])))
 
-def levelset_2(x, y):
-    def fct(x, y):
-        return np.sum(np.abs(rotation(np.pi/6. - np.pi/4., [x, y])), axis=0)
-    return fct(x, y) - np.sqrt(2.)/2.
+def levelset_2(x):
+    def fct(x):
+        return np.sum(np.abs(rotation(np.pi/6. - np.pi/4., x)), axis=0)
+    return fct(x) - np.sqrt(2.)/2.
 
 data_2 = ("Square", "square", Levelset(levelset_2))
 
@@ -94,8 +94,8 @@ def test_outward_normal(data_name, mesh_name, levelset, save_normal=False):
     cdim = mesh.topology.dim
     fdim = mesh.topology.dim - 1
 
-    cells_tags  = tag_entities(mesh, levelset, cdim, plot=True)
-    facets_tags = tag_entities(mesh, levelset, fdim, cells_tags=cells_tags, plot=True)
+    cells_tags  = tag_entities(mesh, levelset, cdim, plot=False)
+    facets_tags = tag_entities(mesh, levelset, fdim, cells_tags=cells_tags, plot=False)
     w0 = compute_outward_normal(mesh, levelset)
 
     if save_normal:

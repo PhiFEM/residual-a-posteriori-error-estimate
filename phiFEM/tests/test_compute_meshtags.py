@@ -2,16 +2,16 @@ from dolfinx.io import XDMFFile
 from mpi4py import MPI
 import numpy as np
 import pytest
-from phiFEM.src.compute_meshtags import tag_entities
-from phiFEM.src.continuous_functions import Levelset
+from phiFEM.phifem.compute_meshtags import tag_entities
+from phiFEM.phifem.continuous_functions import Levelset
 import os
 from test_outward_normal import create_disk
 
 
 """
-Dara_n° = ("Data name", "mesh name", levelset object, "cells benchmark name", "facets benchmark name")
+Data_n° = ("Data name", "mesh name", levelset object, "cells benchmark name", "facets benchmark name")
 """
-data_1 = ("Circle radius 1", "disk", Levelset(lambda x, y: x**2 + y**2 - 0.125), "celltags_1", "facettags_1")
+data_1 = ("Circle radius 1", "disk", Levelset(lambda x: x[0, :]**2 + x[1, :]**2 - 0.125), "celltags_1", "facettags_1")
 
 testdata = [data_1]
 
@@ -19,8 +19,6 @@ parent_dir = os.path.dirname(__file__)
 
 @pytest.mark.parametrize("data_name, mesh_name, levelset, cells_benchmark_name, facets_benchmark_name", testdata)
 def test_compute_meshtags(data_name, mesh_name, levelset, cells_benchmark_name, facets_benchmark_name, save_as_benchmark=False):
-    cells_benchmark = np.loadtxt(os.path.join(parent_dir, "tests_data", cells_benchmark_name + ".csv"), delimiter=" ")
-    facets_benchmark = np.loadtxt(os.path.join(parent_dir, "tests_data", facets_benchmark_name + ".csv"), delimiter=" ")
     mesh_path = os.path.join(parent_dir, "tests_data", "disk" + ".xdmf")
 
     if not os.path.isfile(mesh_path):
@@ -34,7 +32,6 @@ def test_compute_meshtags(data_name, mesh_name, levelset, cells_benchmark_name, 
     cells_tags = tag_entities(mesh,
                               levelset,
                               2)
-
     # Test computation of facets tags when cells tags are provided
     facets_tags = tag_entities(mesh,
                                levelset,
@@ -48,6 +45,15 @@ def test_compute_meshtags(data_name, mesh_name, levelset, cells_benchmark_name, 
 
         facets_benchmark = np.vstack([facets_tags.indices, facets_tags.values])
         np.savetxt(os.path.join(parent_dir, "tests_data", "facettags_1.csv"), facets_benchmark, delimiter=" ", newline="\n")
+    else:
+        try:
+            cells_benchmark = np.loadtxt(os.path.join(parent_dir, "tests_data", cells_benchmark_name + ".csv"), delimiter=" ")
+        except FileNotFoundError:
+            raise FileNotFoundError("{cells_benchmark_name} not found, have you generated the benchmark ?")
+        try:
+            facets_benchmark = np.loadtxt(os.path.join(parent_dir, "tests_data", facets_benchmark_name + ".csv"), delimiter=" ")
+        except FileNotFoundError:
+            raise FileNotFoundError("{facets_benchmark_name} not found, have you generated the benchmark ?")
 
     assert np.all(cells_tags.indices == cells_benchmark[0,:])
     assert np.all(cells_tags.values  == cells_benchmark[1,:])
@@ -73,7 +79,7 @@ if __name__=="__main__":
     with XDMFFile(MPI.COMM_WORLD, os.path.join(parent_dir, "tests_data", "disk.xdmf"), "r") as fi:
         mesh = fi.read_mesh()
     
-    levelset = Levelset(lambda x, y: x**2 + y**2 - 0.125)
+    levelset = Levelset(lambda x: x[:, 0]**2 + x[:, 1]**2 - 0.125)
 
     cells_tags = tag_entities(mesh,
                               levelset,
