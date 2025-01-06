@@ -32,12 +32,12 @@ where
 - `SOLVER` defines the FE solver (`str` among `FEM` or `phiFEM`),
 - `SIZE_INIT_MESH` defines the size of the initial mesh (`float`),
 - `NUM_REF_STEPS` defines the number of refinement steps (`int`),
-- `REFINEMENT_MODE` defines the refinement strategy to use (`str` among `uniform` or `adaptive`).
+- `REFINEMENT_MODE` defines the refinement strategy to use (`str` among `uniform`, `H10` or `L2` --adaptive refinement based on the H10 or L2 error estimator--).
 
 Example:
 ```bash
-cd demo/homogeneous_dirichlet/
-python3 main.py phiFEM 0.1 25 adaptive
+cd demo/pdt_sines/
+python3 main.py phiFEM 0.1 25 H10
 ```
 
 ## Launch unit tests (inside the container from the root directory):
