@@ -744,8 +744,8 @@ class PhiFEMSolver(GenericSolver):
         """
         L2 estimator
         """
-        eta_T = h_T**4 * inner(inner(r, r), w0) * (dx(1) + dx(2))
-        eta_E = avg(h_E)**3 * inner(inner(J_h, J_h), avg(w0)) * (dS(1) + dS(2))
+        eta_T = h_T**4 * inner(inner(r, r), w0) * self.v0 * (dx(1) + dx(2))
+        eta_E = avg(h_E)**3 * inner(inner(J_h, J_h), avg(w0)) * avg(self.v0) * (dS(1) + dS(2))
 
         eta = eta_T + eta_E
 
