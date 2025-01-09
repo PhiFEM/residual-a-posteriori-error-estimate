@@ -60,16 +60,18 @@ def mesh2d_from_levelset(lc: float,
         Z_flat = levelset(arr)
         Z = np.reshape(Z_flat, X.shape)
         cg = contour_generator(x=X, y=Y, z=Z, name="threaded")
-        boundary_vertices = cast(npt.NDArray[np.float64], cg.lines(0.)[0])
+        boundary_vertices = cast(npt.NDArray[np.float64], cg.lines(0.)[0]).T
     else:
-        if geom_vertices.shape[0] == 1:
-            boundary_vertices = np.vstack((geom_vertices, np.zeros_like(geom_vertices), np.zeros_like(geom_vertices)))
-        elif geom_vertices.shape[0] == 2:
-            boundary_vertices = np.vstack((geom_vertices, np.zeros_like(geom_vertices[0, :])))
-        elif geom_vertices.shape[0] == 3:
-            boundary_vertices = geom_vertices
-        else:
-            raise ValueError("The geometry vertices must have at most 3 coordinates, not more.")
+        boundary_vertices = geom_vertices
+    
+    if boundary_vertices.shape[0] == 1:
+        boundary_vertices = np.vstack((boundary_vertices, np.zeros_like(boundary_vertices), np.zeros_like(boundary_vertices)))
+    elif boundary_vertices.shape[0] == 2:
+        boundary_vertices = np.vstack((boundary_vertices, np.zeros_like(boundary_vertices[0, :])))
+    elif boundary_vertices.shape[0] == 3:
+        boundary_vertices = boundary_vertices
+    else:
+        raise ValueError("The geometry vertices must have at most 3 coordinates, not more.")
     
     with pygmsh.geo.Geometry() as geom:
         # The boundary vertices are correctly ordered by matplotlib.
@@ -95,7 +97,7 @@ def mesh2d_from_levelset(lc: float,
         
         tree.write(os.path.join(output_dir, f"{file_name}.xdmf"), pretty_print=True, xml_declaration=True, encoding="UTF-8")
     
-    return boundary_vertices.T
+    return boundary_vertices
 
 def compute_outward_normal(mesh: Mesh, levelset: Levelset) -> Function:
     """ Compute the outward normal to Omega_h.
