@@ -5,7 +5,7 @@ from phiFEM.phifem.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_di
 
 parent_dir = os.path.split(os.path.abspath(__file__))[0]
 
-tilt_angle = np.pi/6. + np.pi/2.
+tilt_angle = np.pi/6.
 shift = np.array([np.pi/32., np.pi/32.])
 
 def rotation(angle, x):

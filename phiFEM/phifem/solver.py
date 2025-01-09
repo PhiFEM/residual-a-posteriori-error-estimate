@@ -69,7 +69,7 @@ class GenericSolver:
         """ Set the source term data.
 
         Args:
-            source_term: ContinuousFunction object, the right-hand side data (force term).
+            source_term: the right-hand side data.
         """
         if source_term.expression is None:
             raise ValueError("The source term has no expression.")
@@ -122,13 +122,13 @@ class GenericSolver:
         """ Compute reference approximations to the exact errors in H10 and L2 norms.
 
         Args:
-            results_saver: Saver object, the saver.
-            expression_u_exact: (optional) method, the expression of the exact solution (if None, a reference solution is computed on a finer reference mesh).
-            save_output: (optional) bool, if True, save the functions, meshes and values to the disk.
-            extra_ref: (optional) int, the number of extra uniform refinements to get the reference mesh.
-            ref_degree: (optional) int, the degree of the finite element used to compute the approximations to the exact errors.
+            results_saver:         the saver.
+            expression_u_exact:    the expression of the exact solution (if None, a reference solution is computed on a finer reference mesh).
+            save_output:           if True, save the functions, meshes and values to the disk.
+            extra_ref:             the number of extra uniform refinements to get the reference mesh.
+            ref_degree:            the degree of the finite element used to compute the approximations to the exact errors.
             interpolation_padding: padding for non-matching mesh interpolation.
-            reference_mesh_path: (optional) os.Path object or str, the path to the reference mesh.
+            reference_mesh_path:   the path to the reference mesh.
         """
         self.print("Compute exact errors.")
 
@@ -276,7 +276,7 @@ class GenericSolver:
         """ Perform maximum marking strategy.
 
         Args:
-            theta: (optional) float, the marking parameter (select the cells with the 100*theta% highest estimator values).
+            theta: the marking parameter (select the cells with the 100*theta% highest estimator values).
         """
         self.print("Mark mesh.")
 
@@ -450,7 +450,7 @@ class PhiFEMSolver(GenericSolver):
 
         Args:
             padding: if True, computes an extra padding layer of cells to increase the chances to keep the level 0 curve of the levelset inside the submesh.
-            plot: if True, plots the mesh tags (very slow).
+            plot:    if True, plots the mesh tags (very slow).
         """
         super().print("Mesh tags computation.")
 
@@ -649,9 +649,9 @@ class PhiFEMSolver(GenericSolver):
         """ Compute the local and global contributions of the residual a posteriori error estimators for the H10 and L2 norms.
 
         Args:
-            V0: (optional) dolfinx.fem.FunctionSpace, the function space in which the local contributions of the residual estimators are interpolated.
-            quadrature_degree: (optional) int, the quadrature degree used in the integrals of the residual estimator.
-            boundary_term: (optional) bool, if True, the boundary term inner(inner(uh, n), w0) * ds is added to the residual estimator.
+            V0: the function space in which the local contributions of the residual estimators are interpolated.
+            quadrature_degree: the quadrature degree used in the integrals of the residual estimator.
+            boundary_term: if True, the boundary term inner(inner(uh, n), w0) * ds is added to the residual estimator.
         """
         super().print("Compute estimators.")
 

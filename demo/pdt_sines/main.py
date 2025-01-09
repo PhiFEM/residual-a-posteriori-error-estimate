@@ -9,30 +9,29 @@ parent_dir = os.path.dirname(__file__)
 tilt_angle = np.pi/6.
 def rotation(angle, x):
     if x.shape[0] == 3:
-        R = jnp.array([[ jnp.cos(angle), jnp.sin(angle), 0],
-                       [-jnp.sin(angle), jnp.cos(angle), 0],
-                       [              0,              0, 1]])
+        R = jnp.array([[jnp.cos(angle), -jnp.sin(angle), 0],
+                       [jnp.sin(angle),  jnp.cos(angle), 0],
+                       [             0,               0, 1]])
     elif x.shape[0] == 2:
-        R = jnp.array([[ jnp.cos(angle), jnp.sin(angle)],
-                       [-jnp.sin(angle), jnp.cos(angle)]])
+        R = jnp.array([[jnp.cos(angle), -jnp.sin(angle)],
+                       [jnp.sin(angle),  jnp.cos(angle)]])
     else:
         raise ValueError("Incompatible argument dimension.")
     return R.dot(jnp.asarray(x))
 
 def expression_levelset(x):
     def fct(x):
-        return jnp.sum(jnp.abs(rotation(tilt_angle - jnp.pi/4., x)), axis=0)
+        return jnp.sum(jnp.abs(rotation(-tilt_angle + jnp.pi/4., x)), axis=0)
     return fct(x) - np.sqrt(2.)/2.
 
 def expression_u_exact(x):
-    return jnp.sin(2. * jnp.pi * rotation(tilt_angle, x)[0, :]) * \
-           jnp.sin(2. * jnp.pi * rotation(tilt_angle, x)[1, :])
+    return jnp.sin(2. * jnp.pi * rotation(-tilt_angle, x)[0, :]) * \
+           jnp.sin(2. * jnp.pi * rotation(-tilt_angle, x)[1, :])
 
 # Not required since jax will compute the negative laplacian of u_exact automatically but we add it since we know the analytical expression :)
 def expression_rhs(x):
-    return 8. * jnp.pi**2 * jnp.sin(2. * jnp.pi * rotation(tilt_angle, x)[0, :]) * \
-                            jnp.sin(2. * jnp.pi * rotation(tilt_angle, x)[1, :])
-
+    return 8. * jnp.pi**2 * jnp.sin(2. * jnp.pi * rotation(-tilt_angle, x)[0, :]) * \
+                            jnp.sin(2. * jnp.pi * rotation(-tilt_angle, x)[1, :])
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser(prog="Sine-sine test case.",
@@ -71,19 +70,19 @@ if __name__=="__main__":
                                  parent_dir,
                                  expression_u_exact=expression_u_exact,
                                  bg_mesh_corners=[np.array([-1., -1.]),
-                                                  np.array([1., 1.])],
+                                                  np.array([1.,   1.])],
                                  ref_method=ref_method,
                                  compute_exact_error=compute_exact_errors)
     
     if solver=="FEM":
-        point_1 = rotation(- tilt_angle - np.pi/4.,
-                            np.array([0., -1.]) * np.sqrt(2.)/2.)
-        point_2 = rotation(- tilt_angle - np.pi/4.,
-                            np.array([1.,  0.]) * np.sqrt(2.)/2.)
-        point_3 = rotation(- tilt_angle - np.pi/4.,
-                            np.array([0.,  1.]) * np.sqrt(2.)/2.)
-        point_4 = rotation(- tilt_angle - np.pi/4.,
-                            np.array([-1., 0.]) * np.sqrt(2.)/2.)
+        point_1 = rotation(tilt_angle,
+                            np.array([-0.5, -0.5]))
+        point_2 = rotation(tilt_angle,
+                            np.array([0.5,  -0.5]))
+        point_3 = rotation(tilt_angle,
+                            np.array([0.5,  0.5]))
+        point_4 = rotation(tilt_angle,
+                            np.array([-0.5, 0.5]))
 
         geom_vertices = np.vstack([point_1, point_2, point_3, point_4]).T
         poisson_dirichlet_FEM(cl,
