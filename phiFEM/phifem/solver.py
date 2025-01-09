@@ -268,9 +268,28 @@ class GenericSolver:
 
         results_saver.add_new_value("H10 error", H10_error_global)
 
+        # We reinterpolate the local exact errors back to the current mesh for an easier comparison with the estimators
+        DG0Element_current_mesh = element("DG", current_mesh.topology.cell_name(), 0)
+        V0_current_mesh = dfx.fem.functionspace(current_mesh, DG0Element_current_mesh)
+        L2_error_0_current_mesh = dfx.fem.Function(V0_current_mesh)
+
+        nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
+                            L2_error_0_current_mesh.function_space.mesh,
+                            L2_error_0_current_mesh.function_space.element,
+                            L2_error_0.function_space.mesh, padding=interpolation_padding)
+        L2_error_0_current_mesh.interpolate(L2_error_0, nmm_interpolation_data=nmm)
+
+        H10_error_0_current_mesh = dfx.fem.Function(V0_current_mesh)
+
+        nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
+                            H10_error_0_current_mesh.function_space.mesh,
+                            H10_error_0_current_mesh.function_space.element,
+                            H10_error_0.function_space.mesh, padding=interpolation_padding)
+        H10_error_0_current_mesh.interpolate(H10_error_0, nmm_interpolation_data=nmm)
+
         if save_output:
-            results_saver.save_function(L2_error_0,  f"L2_error_{str(self.i).zfill(2)}")
-            results_saver.save_function(H10_error_0, f"H10_error_{str(self.i).zfill(2)}")
+            results_saver.save_function(L2_error_0_current_mesh,  f"L2_error_{str(self.i).zfill(2)}")
+            results_saver.save_function(H10_error_0_current_mesh, f"H10_error_{str(self.i).zfill(2)}")
     
     def marking(self, theta: float = 0.3) -> npt.NDArray[np.float64]:
         """ Perform maximum marking strategy.
