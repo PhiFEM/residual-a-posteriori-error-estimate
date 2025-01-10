@@ -184,7 +184,7 @@ def plot_mesh_tags(
     # Get unique tags and create a custom colormap
     colors = [plt.cm.tab10(i / 10.) for i in range(10)]
     colors = colors[:5]
-    cmap = mcolors.ListedColormap(colors)
+    cmap = mcolors.ListedColormap(colors) # type: ignore
     norm = mcolors.BoundaryNorm(np.arange(6) - 0.5, 5)
 
     assert mesh_tags.dim in (mesh.topology.dim, mesh.topology.dim - 1)

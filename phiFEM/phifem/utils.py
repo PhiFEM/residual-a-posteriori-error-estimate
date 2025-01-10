@@ -1,16 +1,18 @@
+from   collections.abc import Callable
 from   copy import deepcopy
 import functools
 import inspect
 import numpy as np
 import os
+from typing import Any
 
-debug = os.getenv("DEBUG")
-if debug=="True":
+debug_env = os.getenv("DEBUG")
+if debug_env=="True":
     debug = True
 else:
     debug = False
 
-def immutable(*arg_names: str) -> None:
+def immutable(*arg_names: str) -> Callable:
     """ Decorator that check if the arguments specified have been modified (only if the DEBUG environment variable is set to True).
 
     Args:
