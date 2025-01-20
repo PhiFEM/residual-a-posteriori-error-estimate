@@ -12,14 +12,14 @@ def expression_1(x):
     return np.abs(x[0, :]) + np.abs(x[1, :]) - np.ones_like(x[0, :])
 geom_vertices_1 = np.array([[1., 0., -1., 0.],
                             [0., 1., 0., -1.]])
-bbox_1 = np.array([[-1.1, -1.1],
-                   [ 1.1,  1.1]])
+bbox_1 = np.array([[-1.1, 1.1],
+                   [-1.1, 1.1]])
 
 # Unit circle
 def expression_2(x):
     return x[0, :]**2 + x[1, :]**2 - np.ones_like(x[0, :])
-bbox_2 = np.array([[-1.1, -1.1],
-                   [ 1.1,  1.1]])
+bbox_2 = np.array([[-1.1, 1.1],
+                   [-1.1, 1.1]])
 
 tilt_angle = np.pi/6. + np.pi/2.
 
@@ -60,8 +60,8 @@ geom_vertices_3_noshift = np.array([[0., 0.5, 0.5, -0.5, -0.5,   0.],
 geom_vertices_3_rot = rotation(np.pi/6., geom_vertices_3_noshift)
 geom_vertices_3 = geom_vertices_3_rot + np.pi/32.
 
-bbox_3 = np.array([[-0.9, -0.7],
-                   [ 0.3,  0.8]])
+bbox_3 = np.array([[-0.9, 0.3],
+                   [-0.7, 0.8]])
 
 data_1  = ("|x|+|y|-1",
            expression_1,

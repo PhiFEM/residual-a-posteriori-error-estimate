@@ -25,8 +25,8 @@ def poisson_dirichlet_phiFEM(cl: float,
                              source_dir: PathStr,
                              expression_rhs: NDArrayFunction | None = None,
                              expression_u_exact: NDArrayFunction | None = None,
-                             bg_mesh_corners: npt.NDArray[np.float64] = np.array([[0., 0.],
-                                                                                  [1., 1.]]),
+                             bbox_vertices: npt.NDArray[np.float64] = np.array([[-1., 1.],
+                                                                                [-1., 1.]]),
                              quadrature_degree: int = 4,
                              sigma_D: float = 1.,
                              save_output: bool = True,
@@ -41,7 +41,7 @@ def poisson_dirichlet_phiFEM(cl: float,
         source_dir: Path object or str, the name of the test case source directory.
         expression_rhs: (optional) method, the expression of the right-hand side term of the PDE (force term) (if None, it is computed from expression_u_exact).
         expression_u_exact: (optional) method, the expression of the exact solution (if None and compute_exact_error=True, a reference solution is computed on a finer mesh).
-        bg_mesh_corners: (optional) (2,2) ndarray, the coordinates of vertices of the background mesh.
+        bbox_vertices: (optional) (2,2) ndarray, the coordinates of vertices of the background mesh.
         quadrature_degree: (optional) int, the degree of quadrature.
         sigma_D: (optional) float, the phiFEM stabilization coefficient.
         save_output: (optional) bool, if True, saves the functions, meshes and values on the disk.
@@ -76,9 +76,9 @@ def poisson_dirichlet_phiFEM(cl: float,
     """
     print("Create initial mesh.")
 
-    nx = int(np.abs(bg_mesh_corners[1][0] - bg_mesh_corners[0][0]) * np.sqrt(2.) / cl)
-    ny = int(np.abs(bg_mesh_corners[1][1] - bg_mesh_corners[0][1]) * np.sqrt(2.) / cl)
-    bg_mesh = dfx.mesh.create_rectangle(MPI.COMM_WORLD, bg_mesh_corners, [nx, ny])
+    nx = int(np.abs(bbox_vertices[1, 0] - bbox_vertices[0, 0]) * np.sqrt(2.) / cl)
+    ny = int(np.abs(bbox_vertices[1, 1] - bbox_vertices[0, 1]) * np.sqrt(2.) / cl)
+    bg_mesh = dfx.mesh.create_rectangle(MPI.COMM_WORLD, bbox_vertices, [nx, ny])
 
     with XDMFFile(bg_mesh.comm, "./bg_mesh.xdmf", "w") as of:
         of.write_mesh(bg_mesh)
@@ -164,7 +164,9 @@ def poisson_dirichlet_FEM(cl: float,
                           save_output: bool = True,
                           ref_method: str = "uniform",
                           compute_exact_error: bool = False,
-                          geom_vertices: npt.NDArray[np.float64] | None = None) -> None:
+                          bbox_vertices: npt.NDArray[np.float64] = np.array([[-1., 1.], [-1., 1.]]),
+                          geom_vertices: npt.NDArray[np.float64] | None = None,
+                          remesh_boundary: bool = False) -> None:
     """ Main loop of FEM solve and refinement for a Poisson-Dirichlet test case.
 
     Args:
@@ -178,6 +180,7 @@ def poisson_dirichlet_FEM(cl: float,
         ref_method: (optional) str, specify the refinement method (three choices: uniform for uniform refinement, H10 for adaptive refinement based on the H10 residual estimator, L2 for adaptive refinement based on the L2 residual estimator).
         compute_exact_error: (optional) bool, if True compute the exact error on a finer reference mesh.
         geom_vertices: (optional) (N, 2) ndarray, vertices of the exact domain.
+        remesh_boundary: if True, recompute the boundary vertices at each refinement step.
     """
     output_dir = os.path.join(source_dir, "output_FEM", ref_method)
 
@@ -205,6 +208,7 @@ def poisson_dirichlet_FEM(cl: float,
     """
     _ = mesh2d_from_levelset(cl,
                              phi,
+                             bbox=bbox_vertices,
                              geom_vertices=geom_vertices,
                              output_dir=output_dir)
 
@@ -263,7 +267,6 @@ def poisson_dirichlet_FEM(cl: float,
                                            save_output=save_output,
                                            save_exact_solution=True)
 
-        # Marking
         if i < max_it - 1:
             # Uniform refinement (Omega_h only)
             if ref_method == "uniform":
@@ -271,13 +274,25 @@ def poisson_dirichlet_FEM(cl: float,
 
             # Adaptive refinement
             if ref_method in ["H10", "L2"]:
+                # Marking
                 facets2ref = FEM_solver.marking()
                 conforming_mesh = dfx.mesh.refine(conforming_mesh, facets2ref)
 
-        if save_output:
-            with XDMFFile(MPI.COMM_WORLD, os.path.join(output_dir, "conforming_mesh.xdmf"), "w") as of:
-                of.write_mesh(conforming_mesh)
-            
-            results_saver.save_values("results.csv")
+            if remesh_boundary:
+                vertices_coordinates = conforming_mesh.geometry.x
+                boundary_vertices = dfx.mesh.locate_entities_boundary(conforming_mesh,
+                                                                      0,
+                                                                      lambda x: np.full(x.shape[1], True, dtype=bool))
+                boundary_vertices_coordinates = vertices_coordinates[boundary_vertices].T
+                _ = mesh2d_from_levelset(1.,
+                                        phi,
+                                        output_dir=output_dir,
+                                        interior_vertices=boundary_vertices_coordinates)
+            else:
+                if save_output:
+                    with XDMFFile(MPI.COMM_WORLD, os.path.join(output_dir, "conforming_mesh.xdmf"), "w") as of:
+                        of.write_mesh(conforming_mesh)
+                    
+                    results_saver.save_values("results.csv")
         
         print("\n")

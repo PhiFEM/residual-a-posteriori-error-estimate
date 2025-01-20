@@ -18,8 +18,8 @@ parent_dir = os.path.dirname(__file__)
 def create_square(mesh_path, lcar):
     mesh_corners = np.array([[-1.5, -1.5],
                              [1.5, 1.5]])
-    nx = int(np.abs(mesh_corners[1][0] - mesh_corners[0][0]) * np.sqrt(2.) / lcar)
-    ny = int(np.abs(mesh_corners[1][1] - mesh_corners[0][1]) * np.sqrt(2.) / lcar)
+    nx = int(np.abs(mesh_corners[1, 0] - mesh_corners[0, 0]) * np.sqrt(2.) / lcar)
+    ny = int(np.abs(mesh_corners[1, 1] - mesh_corners[0, 1]) * np.sqrt(2.) / lcar)
     mesh = dfx.mesh.create_rectangle(MPI.COMM_WORLD, mesh_corners, [nx, ny])
 
     with XDMFFile(mesh.comm, os.path.join("tests_data", "square.xdmf"), "w") as of:

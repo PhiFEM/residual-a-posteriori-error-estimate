@@ -31,8 +31,10 @@ NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
 def mesh2d_from_levelset(lc: float,
                          levelset: Levelset,
                          level:float = 0.,
-                         bbox: npt.NDArray[np.float64] = np.array([[-1., 1.], [-1., 1.]]),
+                         bbox: npt.NDArray[np.float64] = np.array([[-1., 1.],
+                                                                   [-1., 1.]]),
                          geom_vertices: npt.NDArray[np.float64] | None = None,
+                         interior_vertices: npt.NDArray[np.float64] | None = None,
                          output_dir: PathStr | None = None,
                          file_name: str ="conforming_mesh") -> npt.NDArray[np.float64]:
     """ Generate a 2D conforming mesh from a levelset function and saves it as an xdmf mesh.
@@ -52,22 +54,42 @@ def mesh2d_from_levelset(lc: float,
     # TODO: is there a way to combine geom_vertices and contour generated vertices ?
     boundary_vertices: npt.NDArray[np.float64]
     if geom_vertices is None:
-        x = np.arange(bbox[0,0], bbox[1,0], step=lc/np.sqrt(2.), dtype=np.float64)
-        y = np.arange(bbox[0,1], bbox[1,1], step=lc/np.sqrt(2.), dtype=np.float64)
-        X, Y = np.meshgrid(x, y, indexing="ij")
-        X_flat, Y_flat = X.flatten(), Y.flatten()
+        step = lc/np.sqrt(2.)
+
+        if interior_vertices is None:
+            x = np.arange(bbox[0,0], bbox[0,1] + step, step=step, dtype=np.float64)
+            y = np.arange(bbox[1,0], bbox[1,1] + step, step=step, dtype=np.float64)
+            X, Y = np.meshgrid(x, y, indexing="ij")
+            X_flat, Y_flat = X.flatten(), Y.flatten()
+        else:
+            X_flat = interior_vertices[0,:]
+            Y_flat = interior_vertices[1,:]
+
         arr = np.vstack([X_flat, Y_flat])
         Z_flat = levelset(arr)
         Z = np.reshape(Z_flat, X.shape)
-        cg = contour_generator(x=X, y=Y, z=Z, name="threaded")
-        boundary_vertices = cast(npt.NDArray[np.float64], cg.lines(0.)[0]).T
+        cg = contour_generator(x=X, y=Y, z=Z, line_type="ChunkCombinedCode")
+        lines = np.asarray(cg.lines(0.)[0][0])
+
+        # Removes points that are too close from each other
+        lines_shifted = np.zeros_like(lines)
+        lines_shifted[1:,:] = lines[:-1,:]
+        lines_shifted[0,:] = lines[-1,:]
+        diff = lines - lines_shifted
+        dists = np.sqrt(np.square(diff[:,0]) + np.square(diff[:,1]))
+        lines = lines[dists>lc/2,:]
+
+        boundary_vertices = np.unique(cast(npt.NDArray[np.float64], lines).T, axis=0)
     else:
         boundary_vertices = geom_vertices
     
     if boundary_vertices.shape[0] == 1:
-        boundary_vertices = np.vstack((boundary_vertices, np.zeros_like(boundary_vertices), np.zeros_like(boundary_vertices)))
+        boundary_vertices = np.vstack((boundary_vertices,
+                                       np.zeros_like(boundary_vertices),
+                                       np.zeros_like(boundary_vertices)))
     elif boundary_vertices.shape[0] == 2:
-        boundary_vertices = np.vstack((boundary_vertices, np.zeros_like(boundary_vertices[0, :])))
+        boundary_vertices = np.vstack((boundary_vertices,
+                                       np.zeros_like(boundary_vertices[0, :])))
     elif boundary_vertices.shape[0] == 3:
         boundary_vertices = boundary_vertices
     else:
@@ -78,7 +100,7 @@ def mesh2d_from_levelset(lc: float,
         geom.add_polygon(boundary_vertices.T, mesh_size=lc)
         # http://gmsh.info/doc/texinfo/gmsh.html#index-Mesh_002eAlgorithm
         # algorithm=9 for structured mesh (packing of parallelograms)
-        mesh = geom.generate_mesh(dim=2, algorithm=6)
+        mesh = geom.generate_mesh(dim=2, algorithm=1)
 
     for cell_block in mesh.cells:
         if cell_block.type == "triangle":
