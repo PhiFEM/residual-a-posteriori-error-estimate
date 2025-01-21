@@ -88,6 +88,7 @@ def poisson_dirichlet_phiFEM(cl: float,
     working_mesh = bg_mesh
     for i in range(max_it):
         CG1Element = element("Lagrange", working_mesh.topology.cell_name(), 1)
+        CG2Element = element("Lagrange", working_mesh.topology.cell_name(), 2)
 
         # Parametrization of the PETSc solver
         options = Options()
@@ -98,7 +99,13 @@ def poisson_dirichlet_phiFEM(cl: float,
         petsc_solver = KSP().create(working_mesh.comm)
         petsc_solver.setFromOptions()
 
-        phiFEM_solver = PhiFEMSolver(working_mesh, CG1Element, petsc_solver, num_step=i, ref_strat=ref_method, save_output=save_output)
+        phiFEM_solver = PhiFEMSolver(working_mesh,
+                                     CG1Element,
+                                     petsc_solver,
+                                     levelset_element=CG2Element,
+                                     num_step=i,
+                                     ref_strat=ref_method,
+                                     save_output=save_output)
         phiFEM_solver.set_source_term(rhs)
         phiFEM_solver.set_levelset(phi)
         phiFEM_solver.compute_tags(padding=True, plot=False)

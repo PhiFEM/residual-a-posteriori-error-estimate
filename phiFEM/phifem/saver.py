@@ -1,3 +1,5 @@
+from   basix.ufl    import element
+import dolfinx      as dfx
 from   dolfinx.fem  import Function
 from   dolfinx.io   import XDMFFile
 from   dolfinx.mesh import Mesh
@@ -49,10 +51,20 @@ class ResultsSaver:
             function: dolfinx.fem.Function, the finite element function to save.
             file_name: str, the name of the XDMF file storing the function.
         """
+        element_family = function.function_space.element.basix_element.family.name
         mesh = function.function_space.mesh
+        degree = function.function_space.element.basix_element.degree
+        if degree > 1:
+            mesh_element = element(element_family, mesh.topology.cell_name(), 1)
+            mesh_space = dfx.fem.functionspace(mesh, mesh_element)
+            interp = dfx.fem.Function(mesh_space)
+            interp.interpolate(function)
+        else:
+            interp = function
+
         with XDMFFile(mesh.comm, os.path.join(self.output_path, "functions",  file_name + ".xdmf"), "w") as of:
             of.write_mesh(mesh)
-            of.write_function(function)
+            of.write_function(interp)
 
     def save_mesh(self, mesh: Mesh, file_name: str) -> None:
         """ Save a mesh to the disk.

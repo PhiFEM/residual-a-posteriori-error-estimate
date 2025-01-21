@@ -108,9 +108,9 @@ class GenericSolver:
         if self.b is None:
             raise ValueError("SOLVER_NAME.b is None, did you forget to assemble ? (SOLVER_NAME.assemble)")
     
-        self.solution = dfx.fem.Function(self.FE_space)
+        self.solution_wh = dfx.fem.Function(self.FE_space)
         self.petsc_solver.setOperators(self.A)
-        self.petsc_solver.solve(self.b, self.solution.vector)
+        self.petsc_solver.solve(self.b, self.solution_wh.vector)
     
     def compute_exact_error(self,
                             results_saver: ResultsSaver,
@@ -406,6 +406,7 @@ class PhiFEMSolver(GenericSolver):
         self.bg_mesh_cells_tags: MeshTags | None  = None
         self.facets_tags: MeshTags | None         = None
         self.FE_space: FunctionSpace | None       = None
+        self.solution_wh: Function | None         = None
         self.levelset: Levelset | None            = None
         self.levelset_element: _ElementBase | None
         if levelset_element is None:
@@ -679,12 +680,14 @@ class PhiFEMSolver(GenericSolver):
             raise TypeError("SOLVER_NAME.levelset is None.")
         if self.levelset_space is None:
             raise TypeError("SOLVER_NAME.levelset_space is None.")
-        if self.solution is None:
+        if self.solution_wh is None:
             raise TypeError("SOLVER_NAME.solution is None.")
         phi_h = self.levelset.interpolate(self.levelset_space)
         wh = dfx.fem.Function(self.levelset_space)
-        wh.interpolate(self.solution)
+        wh.interpolate(self.solution_wh)
+        self.solution = dfx.fem.Function(self.levelset_space)
         self.solution.x.array[:] = wh.x.array * phi_h.x.array
+        
     
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
