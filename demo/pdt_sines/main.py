@@ -69,8 +69,8 @@ if __name__=="__main__":
                                  expression_levelset,
                                  parent_dir,
                                  expression_u_exact=expression_u_exact,
-                                 bg_mesh_corners=[np.array([-1., -1.]),
-                                                  np.array([1.,   1.])],
+                                 bbox_vertices=np.array([[-1., 1.],
+                                                         [-1., 1.]]),
                                  ref_method=ref_method,
                                  compute_exact_error=compute_exact_errors)
     

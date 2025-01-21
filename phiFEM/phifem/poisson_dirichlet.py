@@ -75,10 +75,9 @@ def poisson_dirichlet_phiFEM(cl: float,
     Create initial mesh
     """
     print("Create initial mesh.")
-
-    nx = int(np.abs(bbox_vertices[1, 0] - bbox_vertices[0, 0]) * np.sqrt(2.) / cl)
-    ny = int(np.abs(bbox_vertices[1, 1] - bbox_vertices[0, 1]) * np.sqrt(2.) / cl)
-    bg_mesh = dfx.mesh.create_rectangle(MPI.COMM_WORLD, bbox_vertices, [nx, ny])
+    nx = int(np.abs(bbox_vertices[0, 1] - bbox_vertices[0, 0]) * np.sqrt(2.) / cl)
+    ny = int(np.abs(bbox_vertices[1, 1] - bbox_vertices[1, 0]) * np.sqrt(2.) / cl)
+    bg_mesh = dfx.mesh.create_rectangle(MPI.COMM_WORLD, bbox_vertices.T, [nx, ny])
 
     with XDMFFile(bg_mesh.comm, "./bg_mesh.xdmf", "w") as of:
         of.write_mesh(bg_mesh)
@@ -136,6 +135,8 @@ def poisson_dirichlet_phiFEM(cl: float,
                                               ref_degree= 1,
                                               expression_u_exact=expression_u_exact,
                                               save_output=save_output)
+            phiFEM_solver.compute_efficiency_coef(results_saver, norm="H10")
+            phiFEM_solver.compute_efficiency_coef(results_saver, norm="L2")
 
         # Marking
         if i < max_it - 1:
@@ -266,6 +267,8 @@ def poisson_dirichlet_FEM(cl: float,
                                            expression_u_exact=expression_u_exact,
                                            save_output=save_output,
                                            save_exact_solution=True)
+            FEM_solver.compute_efficiency_coef(results_saver, norm="H10")
+            FEM_solver.compute_efficiency_coef(results_saver, norm="L2")
 
         if i < max_it - 1:
             # Uniform refinement (Omega_h only)

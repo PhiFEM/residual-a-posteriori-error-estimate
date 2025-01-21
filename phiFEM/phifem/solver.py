@@ -52,6 +52,8 @@ class GenericSolver:
         self.bilinear_form: Form | None     = None
         self.eta_h_H10: Function | None     = None
         self.eta_h_L2: Function | None      = None
+        self.err_H10: Function | None       = None
+        self.err_L2: Function | None        = None
         self.FE_element: _ElementBase       = FE_element
         self.FE_space: FunctionSpace | None = None
         self.i: int                         = num_step
@@ -250,6 +252,7 @@ class GenericSolver:
 
         L2_norm_local_form = dfx.fem.form(L2_norm_local)
         L2_norm_local_form_assembled = assemble_vector(L2_norm_local_form)
+        self.err_L2 = L2_norm_local_form_assembled
         L2_error_0.x.array[:] = L2_norm_local_form_assembled.array
         L2_error_global = np.sqrt(sum(L2_norm_local_form_assembled.array))
 
@@ -260,6 +263,7 @@ class GenericSolver:
 
         H10_norm_local_form = dfx.fem.form(H10_norm_local)
         H10_norm_local_form_assembled = assemble_vector(H10_norm_local_form)
+        self.err_H10 = H10_norm_local_form_assembled
         H10_error_0.x.array[:] = H10_norm_local_form_assembled.array
         H10_error_global = np.sqrt(sum(H10_norm_local_form_assembled.array))
 
@@ -291,6 +295,27 @@ class GenericSolver:
             results_saver.save_function(L2_error_0_current_mesh,  f"L2_error_{str(self.i).zfill(2)}")
             results_saver.save_function(H10_error_0_current_mesh, f"H10_error_{str(self.i).zfill(2)}")
     
+    def compute_efficiency_coef(self,
+                                results_saver: ResultsSaver,
+                                norm: str ="H10") -> None:
+        assert norm in ["H10", "L2"], "The norm must be 'H10' or 'L2'."
+
+        if norm=="H10":
+            eta_h = self.eta_h_H10
+            err   = self.err_H10
+        elif norm=="L2":
+            eta_h = self.eta_h_L2
+            err   = self.err_L2
+        
+        if (eta_h is not None) and (err is not None):
+            eta_global = np.sqrt(sum(eta_h.x.array))
+            err_global = np.sqrt(sum(err.array))
+            eff_coef = eta_global/err_global
+            results_saver.add_new_value(f"{norm} efficiency", eff_coef)
+        else:
+            raise ValueError(f"The {norm} estimator or exact error is missing, did you forget to compute them ? (SOLVER_NAME.estimate_residual or SOLVER_NAME.compute_exact_errors)")
+
+
     def marking(self, theta: float = 0.3) -> npt.NDArray[np.float64]:
         """ Perform maximum marking strategy.
 
