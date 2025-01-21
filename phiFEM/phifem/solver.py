@@ -737,6 +737,7 @@ class PhiFEMSolver(GenericSolver):
 
         r = f_h + div(grad(uh))
         J_h = jump(grad(uh), -n)
+        boundary_correction = inner(grad(uh), grad(uh))
 
         if V0 is None:
             DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
@@ -753,7 +754,9 @@ class PhiFEMSolver(GenericSolver):
         # Facets residual
         eta_E = avg(h_E) * inner(inner(J_h, J_h), avg(w0)) * avg(self.v0) * (dS(1) + dS(2))
 
-        eta = eta_T + eta_E
+        eta_bound = inner(boundary_correction, w0) * self.v0 * dx(2)
+
+        eta = eta_T + eta_E + eta_bound
 
         if boundary_term:
             eta_boundary = h_E * inner(inner(grad(uh), n), inner(grad(uh), n)) * w0 * self.v0 * ds
