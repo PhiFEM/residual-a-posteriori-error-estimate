@@ -417,6 +417,8 @@ class PhiFEMSolver(GenericSolver):
         self.submesh: Mesh | None                 = None
         self.submesh_cells_tags: MeshTags | None  = None
         self.v0: Function | None                  = None
+        self.v0_gamma: Function | None            = None
+        self.solution_wh: Function | None         = None
 
     def _compute_normal(self, mesh: Mesh) -> Function:
         """ Private method used to compute the outward normal to Omega_h.
@@ -578,6 +580,7 @@ class PhiFEMSolver(GenericSolver):
         
         # Set up a DG function with values 1. in Omega_h and 0. outside
         DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
+        CG1Element = element("CG", working_mesh.topology.cell_name(), 1)
         V0 = dfx.fem.functionspace(working_mesh, DG0Element)
         v0 = dfx.fem.Function(V0)
         v0.vector.set(0.)
@@ -588,9 +591,20 @@ class PhiFEMSolver(GenericSolver):
         # We do not need the dofs here since cells and DG0 dofs share the same indices in dolfinx
         v0.x.array[Omega_h_cells] = 1.
 
+        V1 = dfx.fem.functionspace(working_mesh, CG1Element)
+        v0_gamma = dfx.fem.Function(V1)
+        v0_gamma.vector.set(0.)
+        working_mesh.topology.create_connectivity(2, 2)
+        gamma_dofs = dfx.fem.locate_dofs_topological(V1, 2, cut_cells)
+        v0_gamma.x.array[gamma_dofs] = 1.
+
         with XDMFFile(working_mesh.comm, "output_phiFEM/v0.xdmf", "w") as of:
             of.write_mesh(working_mesh)
             of.write_function(v0)
+
+        with XDMFFile(working_mesh.comm, "output_phiFEM/v0_gamma.xdmf", "w") as of:
+            of.write_mesh(working_mesh)
+            of.write_function(v0_gamma)
         
         # TODO: modify to get it work in parallel
         self.FE_space = dfx.fem.functionspace(working_mesh, self.FE_element)
@@ -669,6 +683,7 @@ class PhiFEMSolver(GenericSolver):
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)
         self.v0 = v0
+        self.v0_gamma = v0_gamma
         return v0, dx, dS, num_dofs
     
     def solve(self) -> None:
@@ -683,6 +698,7 @@ class PhiFEMSolver(GenericSolver):
             raise TypeError("SOLVER_NAME.solution is None.")
         phi_h = self.levelset.interpolate(self.levelset_space)
         wh = dfx.fem.Function(self.levelset_space)
+        self.solution_wh = self.solution
         wh.interpolate(self.solution)
         self.solution.x.array[:] = wh.x.array * phi_h.x.array
     
@@ -737,7 +753,9 @@ class PhiFEMSolver(GenericSolver):
 
         r = f_h + div(grad(uh))
         J_h = jump(grad(uh), -n)
-        boundary_correction = inner(grad(uh), grad(uh))
+        uh_boundary = dfx.fem.Function(self.FE_space)
+        uh_boundary.x.array[:] = self.solution_wh.x.array[:] * self.v0_gamma.x.array[:]
+        boundary_correction = inner(grad(uh_boundary), grad(uh_boundary))
 
         if V0 is None:
             DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
@@ -754,7 +772,7 @@ class PhiFEMSolver(GenericSolver):
         # Facets residual
         eta_E = avg(h_E) * inner(inner(J_h, J_h), avg(w0)) * avg(self.v0) * (dS(1) + dS(2))
 
-        eta_bound = inner(boundary_correction, w0) * self.v0 * dx(2)
+        eta_bound = inner(boundary_correction, w0) * self.v0 * (dx(1) + dx(2))
 
         eta = eta_T + eta_E + eta_bound
 

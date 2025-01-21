@@ -21,7 +21,7 @@ def rotation(angle, x):
     return R.dot(np.asarray(x))
 
 def line(x, y, a, b, c):
-    rotated = rotation(tilt_angle, [x, y])
+    rotated = rotation(tilt_angle, np.vstack([x, y]))
     return a*rotated[0] + b*rotated[1] + np.full_like(x, c)
 
 def expression_levelset(x):
@@ -69,8 +69,8 @@ if __name__=="__main__":
                                  expression_levelset,
                                  parent_dir,
                                  expression_rhs=expression_rhs,
-                                 bg_mesh_corners=[np.array([-1., -1.]),
-                                                  np.array([ 1.,  1.])],
+                                 bbox_vertices=np.array([[-1., 1.],
+                                                         [-1., 1.]]),
                                  ref_method=ref_method,
                                  compute_exact_error=compute_exact_errors)
     
