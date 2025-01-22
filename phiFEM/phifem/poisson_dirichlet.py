@@ -149,10 +149,8 @@ def poisson_dirichlet_phiFEM(cl: float,
                 facets2ref = phiFEM_solver.marking()
                 working_mesh = dfx.mesh.refine(working_mesh, facets2ref)
 
-        
-        results_saver.save_values("results.csv")
-
         if save_output:
+            results_saver.save_values("results.csv")
             print("\n")
     
 def poisson_dirichlet_FEM(cl: float,
@@ -291,11 +289,10 @@ def poisson_dirichlet_FEM(cl: float,
                                         phi,
                                         output_dir=output_dir,
                                         interior_vertices=boundary_vertices_coordinates)
-            else:
-                if save_output:
-                    with XDMFFile(MPI.COMM_WORLD, os.path.join(output_dir, "conforming_mesh.xdmf"), "w") as of:
-                        of.write_mesh(conforming_mesh)
-                    
-                    results_saver.save_values("results.csv")
+        if save_output:
+            with XDMFFile(MPI.COMM_WORLD, os.path.join(output_dir, "conforming_mesh.xdmf"), "w") as of:
+                of.write_mesh(conforming_mesh)
+            
+            results_saver.save_values("results.csv")
         
         print("\n")
