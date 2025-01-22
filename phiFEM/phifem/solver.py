@@ -753,9 +753,32 @@ class PhiFEMSolver(GenericSolver):
 
         r = f_h + div(grad(uh))
         J_h = jump(grad(uh), -n)
-        uh_boundary = dfx.fem.Function(self.FE_space)
-        uh_boundary.x.array[:] = self.solution_wh.x.array[:] * self.v0_gamma.x.array[:]
-        boundary_correction = inner(grad(uh_boundary), grad(uh_boundary))
+
+        # Boundary correction function as (phi_h - I_h phi) w_h, where I_h phi is an interpolation of phi into a finer space.
+        phih = dfx.fem.Function(self.FE_space)
+        phih.interpolate(self.levelset)
+
+        CG2Element = element("Lagrange", working_mesh.topology.cell_name(), 2)
+        V2 = dfx.fem.functionspace(working_mesh, CG2Element)
+
+        phih_2 = dfx.fem.Function(V2)
+        phih_2.interpolate(phih)
+
+        phi2 = dfx.fem.Function(V2)
+        phi2.interpolate(self.levelset)
+
+        wh2 = dfx.fem.Function(V2)
+        wh2.interpolate(self.solution_wh)
+
+        correction_function = dfx.fem.Function(V2)
+        correction_function.x.array[:] = (phih_2.x.array[:] - phi2.x.array[:]) * wh2.x.array[:]
+
+        # Boundary correction function as the restriction of uh near the boundary
+        # uh_boundary = dfx.fem.Function(self.FE_space)
+        # uh_boundary.x.array[:] = self.solution_wh.x.array[:] * self.v0_gamma.x.array[:]
+
+        boundary_correction = inner(grad(correction_function),
+                                    grad(correction_function))
 
         if V0 is None:
             DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
@@ -790,10 +813,14 @@ class PhiFEMSolver(GenericSolver):
         """
         L2 estimator
         """
+        boundary_correction = inner(correction_function,
+                                    correction_function)
+
         eta_T = h_T**4 * inner(inner(r, r), w0) * self.v0 * (dx(1) + dx(2))
         eta_E = avg(h_E)**3 * inner(inner(J_h, J_h), avg(w0)) * avg(self.v0) * (dS(1) + dS(2))
+        eta_bound = inner(boundary_correction, w0) * self.v0 * (dx(1) + dx(2))
 
-        eta = eta_T + eta_E
+        eta = eta_T + eta_E + eta_bound
 
         if boundary_term:
             eta_boundary = h_E**3 * inner(inner(grad(uh), n), inner(grad(uh), n)) * w0 * self.v0 * ds
