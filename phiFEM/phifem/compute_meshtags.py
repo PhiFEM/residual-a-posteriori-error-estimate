@@ -146,8 +146,8 @@ def tag_entities(mesh: Mesh,
                      exterior_entities]
 
 
-        assert len(interior_entities)     > 0,  "No interior cells (1) tagged!"
-        assert len(cut_fronteer_entities) > 0,  "No cut cells (2) tagged!"
+        assert len(interior_entities)     > 0, "No interior cells (1) tagged!"
+        assert len(cut_fronteer_entities) > 0, "No cut cells (2) tagged!"
         if padding:
             assert len(padding_entities)  > 0, "No padding cells (4) tagged!"
 

@@ -19,10 +19,18 @@ def rotation(angle, x):
         raise ValueError("Incompatible argument dimension.")
     return R.dot(jnp.asarray(x))
 
-def expression_levelset(x):
+def tilted_square(x):
     def fct(x):
         return jnp.sum(jnp.abs(rotation(-tilt_angle + jnp.pi/4., x)), axis=0)
     return fct(x) - np.sqrt(2.)/2.
+
+def expression_levelset(x):
+    def func(x):
+        
+    val = -jnp.cos(jnp.pi * rotation(-tilt_angle, x)[0, :]) * \
+           jnp.cos(jnp.pi * rotation(-tilt_angle, x)[1, :])
+    val = val.at[np.where(tilted_square(x) > 0.)].set(1.)
+    return val
 
 def expression_u_exact(x):
     return jnp.sin(2. * jnp.pi * rotation(-tilt_angle, x)[0, :]) * \
