@@ -790,6 +790,13 @@ class PhiFEMSolver(GenericSolver):
         CGfElement = element("Lagrange", working_mesh.topology.cell_name(), levelset_degree + 1)
         Vf = dfx.fem.functionspace(working_mesh, CGfElement)
 
+        # Get the dofs except those on the cut cells
+        cut_cells = self.submesh_cells_tags.find(2)
+        cut_cells_dofs = dfx.fem.locate_dofs_topological(Vf, 2, cut_cells)
+        num_dofs_global = Vf.dofmap.index_map.size_global * Vf.dofmap.index_map_bs
+        all_dofs = np.arange(num_dofs_global)
+        uncut_cells_dofs = np.setdiff1d(all_dofs, cut_cells_dofs)
+
         phih_2 = dfx.fem.Function(Vf)
         phih_2.interpolate(phih)
 
@@ -801,7 +808,10 @@ class PhiFEMSolver(GenericSolver):
 
         correction_function = dfx.fem.Function(Vf)
         correction_function.x.array[:] = (phih_2.x.array[:] - phi2.x.array[:]) * wh2.x.array[:]
+        correction_function.x.array[uncut_cells_dofs] = 0.
 
+        correction_function_V = dfx.fem.Function(self.FE_space)
+        correction_function_V.interpolate(correction_function)
         # Boundary correction function as the restriction of uh near the boundary
         # uh_boundary = dfx.fem.Function(self.FE_space)
         # uh_boundary.x.array[:] = self.solution_wh.x.array[:] * self.v0_gamma.x.array[:]
