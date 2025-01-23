@@ -112,7 +112,7 @@ def poisson_dirichlet_phiFEM(cl: float,
         v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
         results_saver.add_new_value("dofs", num_dofs)
         phiFEM_solver.assemble()
-        phiFEM_solver.solve()
+        phiFEM_solver.solve(use_fine_space=True)
         uh = phiFEM_solver.get_solution()
 
         if phiFEM_solver.submesh is None:
@@ -138,8 +138,11 @@ def poisson_dirichlet_phiFEM(cl: float,
             results_saver.save_mesh    (working_mesh, f"mesh_{str(i).zfill(2)}")
 
         if compute_exact_error:
+            solution_degree = phiFEM_solver.solution.function_space.element.basix_element.degree
+            levelset_degree = phiFEM_solver.levelset_space.element.basix_element.degree
+            ref_degree = solution_degree + levelset_degree + 1
             phiFEM_solver.compute_exact_error(results_saver,
-                                              ref_degree= 1,
+                                              ref_degree= ref_degree,
                                               expression_u_exact=expression_u_exact,
                                               save_output=save_output)
             phiFEM_solver.compute_efficiency_coef(results_saver, norm="H10")
@@ -268,7 +271,7 @@ def poisson_dirichlet_FEM(cl: float,
 
         if compute_exact_error:
             FEM_solver.compute_exact_error(results_saver,
-                                           ref_degree=1,
+                                           ref_degree=2,
                                            expression_u_exact=expression_u_exact,
                                            save_output=save_output,
                                            save_exact_solution=True)

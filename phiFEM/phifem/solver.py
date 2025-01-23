@@ -687,7 +687,7 @@ class PhiFEMSolver(GenericSolver):
         self.v0_gamma = v0_gamma
         return v0, dx, dS, num_dofs
     
-    def solve(self) -> None:
+    def solve(self, use_fine_space: bool = False) -> None:
         """ Solve the phiFEM linear system."""
         super().solve()
         # TODO: to be fixed when levelset_space != FE_space
@@ -695,14 +695,21 @@ class PhiFEMSolver(GenericSolver):
             raise TypeError("SOLVER_NAME.levelset is None.")
         if self.levelset_space is None:
             raise TypeError("SOLVER_NAME.levelset_space is None.")
-        if self.solution_wh is None:
+        if self.solution is None:
             raise TypeError("SOLVER_NAME.solution is None.")
-        phi_h = self.levelset.interpolate(self.levelset_space)
-        wh = dfx.fem.Function(self.levelset_space)
-        wh.interpolate(self.solution_wh)
-        self.solution = dfx.fem.Function(self.levelset_space)
-        self.solution.x.array[:] = wh.x.array * phi_h.x.array
-        
+        self.solution_wh = self.solution
+        if use_fine_space:
+            FE_degree       = self.FE_space.element.basix_element.degree
+            levelset_degree = self.levelset_space.element.basix_element.degree
+            SolutionElement = element("Lagrange", self.submesh.topology.cell_name(), FE_degree + levelset_degree)
+            SolutionSpace = dfx.fem.functionspace(self.submesh, SolutionElement)
+        else:
+            SolutionSpace = self.levelset_space
+        phi_h = self.levelset.interpolate(SolutionSpace)
+        wh = dfx.fem.Function(SolutionSpace)
+        wh.interpolate(self.solution)
+        self.solution = dfx.fem.Function(SolutionSpace)
+        self.solution.x.array[:] = wh.x.array[:] * phi_h.x.array[:]
     
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
@@ -757,29 +764,29 @@ class PhiFEMSolver(GenericSolver):
         J_h = jump(grad(uh), -n)
 
         # Boundary correction function as (phi_h - I_h phi) w_h, where I_h phi is an interpolation of phi into a finer space.
-        phih = dfx.fem.Function(self.FE_space)
-        phih.interpolate(self.levelset)
+        phih = self.levelset.interpolate(self.levelset_space)
 
-        CG2Element = element("Lagrange", working_mesh.topology.cell_name(), 2)
-        V2 = dfx.fem.functionspace(working_mesh, CG2Element)
+        levelset_degree = self.levelset_space.element.basix_element.degree
+        CGfElement = element("Lagrange", working_mesh.topology.cell_name(), levelset_degree + 1)
+        Vf = dfx.fem.functionspace(working_mesh, CGfElement)
 
-        phih_2 = dfx.fem.Function(V2)
+        phih_2 = dfx.fem.Function(Vf)
         phih_2.interpolate(phih)
 
-        phi2 = dfx.fem.Function(V2)
+        phi2 = dfx.fem.Function(Vf)
         phi2.interpolate(self.levelset)
 
-        wh2 = dfx.fem.Function(V2)
+        wh2 = dfx.fem.Function(Vf)
         wh2.interpolate(self.solution_wh)
 
-        correction_function = dfx.fem.Function(V2)
+        correction_function = dfx.fem.Function(Vf)
         correction_function.x.array[:] = (phih_2.x.array[:] - phi2.x.array[:]) * wh2.x.array[:]
 
         # Boundary correction function as the restriction of uh near the boundary
         # uh_boundary = dfx.fem.Function(self.FE_space)
         # uh_boundary.x.array[:] = self.solution_wh.x.array[:] * self.v0_gamma.x.array[:]
 
-        boundary_correction = inner(grad(correction_function),
+        geometry_correction = inner(grad(correction_function),
                                     grad(correction_function))
 
         if V0 is None:
@@ -797,14 +804,15 @@ class PhiFEMSolver(GenericSolver):
         # Facets residual
         eta_E = avg(h_E) * inner(inner(J_h, J_h), avg(w0)) * avg(self.v0) * (dS(1) + dS(2))
 
-        eta_bound = inner(boundary_correction, w0) * self.v0 * (dx(1) + dx(2))
+        eta_geometry = inner(geometry_correction, w0) * self.v0 * (dx(1) + dx(2))
 
-        eta = eta_T + eta_E + eta_bound
+        eta = eta_T + eta_E + eta_geometry
 
+        eta_boundary = None
         if boundary_term:
             eta_boundary = h_E * inner(inner(grad(uh), n), inner(grad(uh), n)) * w0 * self.v0 * ds
             eta += eta_boundary
-        
+
         eta_form = dfx.fem.form(eta)
 
         eta_vec = dfx.fem.petsc.assemble_vector(eta_form)
@@ -815,15 +823,16 @@ class PhiFEMSolver(GenericSolver):
         """
         L2 estimator
         """
-        boundary_correction = inner(correction_function,
+        geometry_correction = inner(correction_function,
                                     correction_function)
 
         eta_T = h_T**4 * inner(inner(r, r), w0) * self.v0 * (dx(1) + dx(2))
         eta_E = avg(h_E)**3 * inner(inner(J_h, J_h), avg(w0)) * avg(self.v0) * (dS(1) + dS(2))
-        eta_bound = inner(boundary_correction, w0) * self.v0 * (dx(1) + dx(2))
+        eta_geometry = inner(geometry_correction, w0) * self.v0 * (dx(1) + dx(2))
 
-        eta = eta_T + eta_E + eta_bound
+        eta = eta_T + eta_E + eta_geometry
 
+        eta_boundary = None
         if boundary_term:
             eta_boundary = h_E**3 * inner(inner(grad(uh), n), inner(grad(uh), n)) * w0 * self.v0 * ds
             eta += eta_boundary
