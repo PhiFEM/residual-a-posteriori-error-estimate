@@ -115,6 +115,7 @@ def poisson_dirichlet_phiFEM(cl: float,
         phiFEM_solver.assemble()
         phiFEM_solver.solve(use_fine_space=True)
         uh = phiFEM_solver.get_solution()
+        wh = phiFEM_solver.get_solution_wh()
 
         if phiFEM_solver.submesh is None:
             raise TypeError("phiFEM_solver.submesh is None.")
@@ -123,7 +124,7 @@ def poisson_dirichlet_phiFEM(cl: float,
 
         V = dfx.fem.functionspace(working_mesh, CG1Element)
         phiV = phi.interpolate(V)
-        h10_residuals, l2_residuals = phiFEM_solver.estimate_residual()
+        h10_residuals, l2_residuals, correction_function = phiFEM_solver.estimate_residual()
         eta_h_H10 = phiFEM_solver.get_eta_h_H10()
         results_saver.add_new_value("H10 estimator", np.sqrt(sum(eta_h_H10.x.array[:])))
         eta_h_L2 = phiFEM_solver.get_eta_h_L2()
@@ -138,12 +139,14 @@ def poisson_dirichlet_phiFEM(cl: float,
                         res_name = "eta_" + res_letter + "_" + norm
                         assemble_and_save_residual(working_mesh, results_saver, eta, res_name, i)
 
-            results_saver.save_function(eta_h_H10,    f"eta_h_H10_{str(i).zfill(2)}")
-            results_saver.save_function(eta_h_L2,     f"eta_h_L2_{str(i).zfill(2)}")
-            results_saver.save_function(phiV,         f"phi_V_{str(i).zfill(2)}")
-            results_saver.save_function(v0,           f"v0_{str(i).zfill(2)}")
-            results_saver.save_function(uh,           f"uh_{str(i).zfill(2)}")
-            results_saver.save_mesh    (working_mesh, f"mesh_{str(i).zfill(2)}")
+            results_saver.save_function(eta_h_H10,           f"eta_h_H10_{str(i).zfill(2)}")
+            results_saver.save_function(eta_h_L2,            f"eta_h_L2_{str(i).zfill(2)}")
+            results_saver.save_function(phiV,                f"phi_V_{str(i).zfill(2)}")
+            results_saver.save_function(v0,                  f"v0_{str(i).zfill(2)}")
+            results_saver.save_function(uh,                  f"uh_{str(i).zfill(2)}")
+            results_saver.save_function(wh,                  f"wh_{str(i).zfill(2)}")
+            results_saver.save_function(correction_function, f"boundary_correction_{str(i).zfill(2)}")
+            results_saver.save_mesh    (working_mesh,        f"mesh_{str(i).zfill(2)}")
 
         if compute_exact_error:
             solution_degree = phiFEM_solver.solution.function_space.element.basix_element.degree

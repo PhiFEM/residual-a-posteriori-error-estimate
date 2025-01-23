@@ -63,6 +63,7 @@ class GenericSolver:
         self.ref_strat: str                 = ref_strat
         self.rhs: ContinuousFunction | None = None
         self.save_output: bool              = save_output
+        self.solution_wh: Function | None   = None
         self.solution: Function | None      = None
         self.bcs: list[Any]                 = []
         self.solver_type: str               = "Generic"
@@ -95,7 +96,8 @@ class GenericSolver:
     def print(self, str2print: str) -> None:
         """ Print the state of the solver."""
         if self.save_output:
-            print(f"Solver: {self.solver_type}. Refinement: {self.ref_strat}. Iteration n° {str(self.i).zfill(2)}. {str2print}")
+            FE_degree = self.FE_element.basix_element.degree
+            print(f"Solver: {self.solver_type}. Refinement: {self.ref_strat}. FE degree: {FE_degree}. Iteration n° {str(self.i).zfill(2)}. {str2print}")
     
     def solve(self) -> None:
         """ Solve the FE linear system."""
@@ -108,9 +110,9 @@ class GenericSolver:
         if self.b is None:
             raise ValueError("SOLVER_NAME.b is None, did you forget to assemble ? (SOLVER_NAME.assemble)")
     
-        self.solution = dfx.fem.Function(self.FE_space)
+        self.solution_wh = dfx.fem.Function(self.FE_space)
         self.petsc_solver.setOperators(self.A)
-        self.petsc_solver.solve(self.b, self.solution.vector)
+        self.petsc_solver.solve(self.b, self.solution_wh.vector)
     
     def compute_exact_error(self,
                             results_saver: ResultsSaver,
@@ -383,6 +385,7 @@ class PhiFEMSolver(GenericSolver):
                  PETSc_solver: PETSc_KSP,
                  ref_strat: str = "uniform",
                  levelset_element: _ElementBase | None = None,
+                 use_fine_space: bool = False,
                  num_step: int = 0,
                  save_output: bool = True) -> None:
         """ Initialize a phiFEM solver object.
@@ -393,6 +396,7 @@ class PhiFEMSolver(GenericSolver):
             PETSc_solver: the PETSc solver used to solve the finite element linear system.
             ref_strat: the refinement strategy ('uniform' for uniform refinement, 'H10' for adaptive refinement based on the H10 residual estimator, 'L2' for adaptive refinement based on the L2 residual estimator).
             levelset_element: the finite element used to discretize the levelset function.
+            use_fine_space: use the proper fine space for the phiFEM solution (i.e. space of degree FE_degree + levelset_degree).
             num_step: the refinement step number.
             save_output: if True, save the functions, meshes and values to the disk.
         """
@@ -406,7 +410,6 @@ class PhiFEMSolver(GenericSolver):
         self.bg_mesh_cells_tags: MeshTags | None  = None
         self.facets_tags: MeshTags | None         = None
         self.FE_space: FunctionSpace | None       = None
-        self.solution_wh: Function | None         = None
         self.levelset: Levelset | None            = None
         self.levelset_element: _ElementBase | None
         if levelset_element is None:
@@ -417,9 +420,9 @@ class PhiFEMSolver(GenericSolver):
         self.solver_type: str                     = "phiFEM"
         self.submesh: Mesh | None                 = None
         self.submesh_cells_tags: MeshTags | None  = None
+        self.use_fine_space: bool                 = use_fine_space
         self.v0: Function | None                  = None
         self.v0_gamma: Function | None            = None
-        self.solution_wh: Function | None         = None
 
     def _compute_normal(self, mesh: Mesh) -> Function:
         """ Private method used to compute the outward normal to Omega_h.
@@ -687,7 +690,7 @@ class PhiFEMSolver(GenericSolver):
         self.v0_gamma = v0_gamma
         return v0, dx, dS, num_dofs
     
-    def solve(self, use_fine_space: bool = False) -> None:
+    def solve(self) -> None:
         """ Solve the phiFEM linear system."""
         super().solve()
         # TODO: to be fixed when levelset_space != FE_space
@@ -695,21 +698,27 @@ class PhiFEMSolver(GenericSolver):
             raise TypeError("SOLVER_NAME.levelset is None.")
         if self.levelset_space is None:
             raise TypeError("SOLVER_NAME.levelset_space is None.")
-        if self.solution is None:
-            raise TypeError("SOLVER_NAME.solution is None.")
-        self.solution_wh = self.solution
-        if use_fine_space:
+        if self.solution_wh is None:
+            raise TypeError("SOLVER_NAME.solution_wh is None.")
+
+        if self.use_fine_space:
             FE_degree       = self.FE_space.element.basix_element.degree
             levelset_degree = self.levelset_space.element.basix_element.degree
             SolutionElement = element("Lagrange", self.submesh.topology.cell_name(), FE_degree + levelset_degree)
             SolutionSpace = dfx.fem.functionspace(self.submesh, SolutionElement)
         else:
             SolutionSpace = self.levelset_space
+
         phi_h = self.levelset.interpolate(SolutionSpace)
         wh = dfx.fem.Function(SolutionSpace)
-        wh.interpolate(self.solution)
+        wh.interpolate(self.solution_wh)
         self.solution = dfx.fem.Function(SolutionSpace)
         self.solution.x.array[:] = wh.x.array[:] * phi_h.x.array[:]
+
+    def get_solution_wh(self) -> Function:
+        if self.solution_wh is None:
+            raise ValueError("SOLVER_NAME.solution_wh is None, did you forget to solve ? (SOLVER_NAME.solve)")
+        return self.solution_wh
     
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
@@ -856,7 +865,7 @@ class PhiFEMSolver(GenericSolver):
                         "Internal edges residual": eta_E,
                         "Geometry residual":       eta_geometry,
                         "Boundary edges residual": eta_boundary}
-        return h10_residuals, l2_residuals
+        return h10_residuals, l2_residuals, correction_function_V
 
 class FEMSolver(GenericSolver):
     """ Class representing a FEM solver as a GenericSolver object."""
@@ -934,6 +943,11 @@ class FEMSolver(GenericSolver):
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)
         return num_dofs
+
+    def solve(self) -> None:
+        super().solve()
+        self.solution = dfx.fem.Function(self.FE_space)
+        self.solution.x.array[:] = self.solution_wh.x.array[:]
 
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
