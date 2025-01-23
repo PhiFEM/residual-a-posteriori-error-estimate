@@ -12,8 +12,9 @@ from   typing import Tuple
 
 from phiFEM.phifem.solver import PhiFEMSolver, FEMSolver
 from phiFEM.phifem.continuous_functions import Levelset, ExactSolution, ContinuousFunction
-from phiFEM.phifem.saver import ResultsSaver
 from phiFEM.phifem.mesh_scripts import mesh2d_from_levelset
+from phiFEM.phifem.saver import ResultsSaver
+from phiFEM.phifem.utils import assemble_and_save_residual
 
 PathStr = PathLike[str] | str
 NDArrayTuple = Tuple[npt.NDArray[np.float64]]
@@ -122,7 +123,7 @@ def poisson_dirichlet_phiFEM(cl: float,
 
         V = dfx.fem.functionspace(working_mesh, CG1Element)
         phiV = phi.interpolate(V)
-        phiFEM_solver.estimate_residual()
+        h10_residuals, l2_residuals = phiFEM_solver.estimate_residual()
         eta_h_H10 = phiFEM_solver.get_eta_h_H10()
         results_saver.add_new_value("H10 estimator", np.sqrt(sum(eta_h_H10.x.array[:])))
         eta_h_L2 = phiFEM_solver.get_eta_h_L2()
@@ -130,6 +131,13 @@ def poisson_dirichlet_phiFEM(cl: float,
 
         # Save results
         if save_output:
+            for dict_res, norm in zip([h10_residuals, l2_residuals], ["H10", "L2"]):
+                for key, res_letter in zip(dict_res.keys(), ["T", "E", "G", "Eb"]):
+                    eta = dict_res[key]
+                    if eta is not None:
+                        res_name = "eta_" + res_letter + "_" + norm
+                        assemble_and_save_residual(working_mesh, results_saver, eta, res_name, i)
+
             results_saver.save_function(eta_h_H10,    f"eta_h_H10_{str(i).zfill(2)}")
             results_saver.save_function(eta_h_L2,     f"eta_h_L2_{str(i).zfill(2)}")
             results_saver.save_function(phiV,         f"phi_V_{str(i).zfill(2)}")
@@ -256,7 +264,7 @@ def poisson_dirichlet_FEM(cl: float,
         FEM_solver.solve()
         uh = FEM_solver.get_solution()
 
-        FEM_solver.estimate_residual()
+        h10_residuals, l2_residuals = FEM_solver.estimate_residual()
         eta_h_H10 = FEM_solver.get_eta_h_H10()
         results_saver.add_new_value("H10 estimator", np.sqrt(sum(eta_h_H10.x.array[:])))
         eta_h_L2 = FEM_solver.get_eta_h_L2()
@@ -264,6 +272,13 @@ def poisson_dirichlet_FEM(cl: float,
 
         # Save results
         if save_output:
+            for dict_res, norm in zip([h10_residuals, l2_residuals], ["H10", "L2"]):
+                for key, res_letter in zip(dict_res.keys(), ["T", "E", "G", "Eb"]):
+                    eta = dict_res[key]
+                    if eta is not None:
+                        res_name = "eta_" + res_letter + "_" + norm
+                        assemble_and_save_residual(conforming_mesh, results_saver, eta, res_name, i)
+
             results_saver.save_function(eta_h_H10,       f"eta_h_H10_{str(i).zfill(2)}")
             results_saver.save_function(eta_h_L2,        f"eta_h_L2_{str(i).zfill(2)}")
             results_saver.save_function(uh,              f"uh_{str(i).zfill(2)}")

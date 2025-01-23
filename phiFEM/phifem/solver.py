@@ -714,13 +714,17 @@ class PhiFEMSolver(GenericSolver):
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
                           quadrature_degree: int | None = None,
-                          boundary_term: bool = False) -> None:
+                          boundary_term: bool = False) -> Tuple[dict[str, Any], dict[str, Any]]:
         """ Compute the local and global contributions of the residual a posteriori error estimators for the H10 and L2 norms.
 
         Args:
             V0: the function space in which the local contributions of the residual estimators are interpolated.
             quadrature_degree: the quadrature degree used in the integrals of the residual estimator.
             boundary_term: if True, the boundary term inner(inner(uh, n), w0) * ds is added to the residual estimator.
+
+        Returns:
+            h10_residuals: dictionnary containing all the H1 semi-norm residuals.
+            l2_residuals: dictionnary containing all the L2 norm residuals.
         """
         super().print("Compute estimators.")
 
@@ -820,6 +824,11 @@ class PhiFEMSolver(GenericSolver):
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_H10 = eta_h
 
+        h10_residuals = {"Interior residual":       eta_T,
+                         "Internal edges residual": eta_E,
+                         "Geometry residual":       eta_geometry,
+                         "Boundary edges residual": eta_boundary}
+
         """
         L2 estimator
         """
@@ -843,6 +852,11 @@ class PhiFEMSolver(GenericSolver):
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_L2 = eta_h
 
+        l2_residuals = {"Interior residual":       eta_T,
+                        "Internal edges residual": eta_E,
+                        "Geometry residual":       eta_geometry,
+                        "Boundary edges residual": eta_boundary}
+        return h10_residuals, l2_residuals
 
 class FEMSolver(GenericSolver):
     """ Class representing a FEM solver as a GenericSolver object."""
@@ -929,6 +943,10 @@ class FEMSolver(GenericSolver):
         Args:
             V0: (optional) dolfinx.fem.FunctionSpace, the function space in which the local contributions of the residual estimators are interpolated.
             quadrature_degree: (optional) int, the quadrature degree used in the integrals of the residual estimator.
+        
+        Returns:
+            h10_residuals: dictionnary containing all the H1 semi-norm residuals.
+            l2_residuals: dictionnary containing all the L2 norm residuals.
         """
         super().print("Compute estimators.")
 
@@ -982,6 +1000,11 @@ class FEMSolver(GenericSolver):
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_H10 = eta_h
 
+        h10_residuals = {"Interior residual":       eta_T,
+                         "Internal edges residual": eta_E,
+                         "Geometry residual":       None,
+                         "Boundary edges residual": None}
+
         """
         L2 estimator
         """
@@ -995,3 +1018,9 @@ class FEMSolver(GenericSolver):
         eta_h = dfx.fem.Function(V0)
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_L2 = eta_h
+
+        l2_residuals = {"Interior residual":       eta_T,
+                        "Internal edges residual": eta_E,
+                        "Geometry residual":       None,
+                        "Boundary edges residual": None}
+        return h10_residuals, l2_residuals

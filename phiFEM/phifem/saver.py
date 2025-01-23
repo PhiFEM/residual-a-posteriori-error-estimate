@@ -83,5 +83,9 @@ class ResultsSaver:
             file_name: str, name of the csv file storing the dataframe.
         """
         df = pd.DataFrame(self.results)
+        cols = sorted(list(df.columns.values))
+        cols.remove("dofs")
+        cols.insert(0, "dofs")
+        df = df[cols]
         df.to_csv(os.path.join(self.output_path, file_name))
         print(df)
