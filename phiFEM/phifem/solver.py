@@ -108,9 +108,9 @@ class GenericSolver:
         if self.b is None:
             raise ValueError("SOLVER_NAME.b is None, did you forget to assemble ? (SOLVER_NAME.assemble)")
     
-        self.solution_wh = dfx.fem.Function(self.FE_space)
+        self.solution = dfx.fem.Function(self.FE_space)
         self.petsc_solver.setOperators(self.A)
-        self.petsc_solver.solve(self.b, self.solution_wh.vector)
+        self.petsc_solver.solve(self.b, self.solution.vector)
     
     def compute_exact_error(self,
                             results_saver: ResultsSaver,

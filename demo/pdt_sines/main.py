@@ -24,12 +24,24 @@ def tilted_square(x):
         return jnp.sum(jnp.abs(rotation(-tilt_angle + jnp.pi/4., x)), axis=0)
     return fct(x) - np.sqrt(2.)/2.
 
+# Levelset as a pyramid function
+# def expression_levelset(x):
+#     return tilted_square(x)
+
+# Smooth polynomial levelset (TODO)
+# def expression_levelset(x):
+#     shift_x = x[0, :] - jnp.full_like(x[0, :], 0.5)
+#     shift_y = x[1, :] - jnp.full_like(x[1, :], 0.5)
+#     val = -shift_x * (jnp.ones_like(shift_x) - shift_x) * (jnp.ones_like(shift_y) - shift_y) * shift_y
+#     val = val.at[jnp.where(tilted_square(x) > 0.)].set(1.)
+#     return val
+
+# Smooth levelset
 def expression_levelset(x):
-    def func(x):
-        
-    val = -jnp.cos(jnp.pi * rotation(-tilt_angle, x)[0, :]) * \
-           jnp.cos(jnp.pi * rotation(-tilt_angle, x)[1, :])
-    val = val.at[np.where(tilted_square(x) > 0.)].set(1.)
+    val = -np.cos(np.pi * rotation(-tilt_angle, x)[0, :]) * \
+           np.cos(np.pi * rotation(-tilt_angle, x)[1, :])
+    val_ext = tilted_square(x)
+    val[val_ext > 0.] = val_ext[val_ext > 0.]
     return val
 
 def expression_u_exact(x):
@@ -77,6 +89,7 @@ if __name__=="__main__":
                                  expression_levelset,
                                  parent_dir,
                                  expression_u_exact=expression_u_exact,
+                                 expression_rhs=expression_rhs,
                                  bbox_vertices=np.array([[-1., 1.],
                                                          [-1., 1.]]),
                                  ref_method=ref_method,
@@ -97,6 +110,7 @@ if __name__=="__main__":
                               num_it,
                               expression_levelset,
                               parent_dir,
+                              expression_u_exact=expression_u_exact,
                               expression_rhs=expression_rhs,
                               quadrature_degree=4,
                               ref_method=ref_method,
