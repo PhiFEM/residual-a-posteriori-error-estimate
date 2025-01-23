@@ -477,6 +477,13 @@ class PhiFEMSolver(GenericSolver):
                                                     cells_indices[sorted_indices],
                                                     cells_markers[sorted_indices])
 
+    def print(self, str2print: str) -> None:
+        """ Print the state of the solver."""
+        if self.save_output:
+            FE_degree = self.FE_element.basix_element.degree
+            levelset_degree = self.levelset_element.basix_element.degree
+            print(f"Solver: {self.solver_type}. Refinement: {self.ref_strat}. FE degree: {FE_degree}. Levelset degree: {levelset_degree}. Use fine space: {str(self.use_fine_space)}. Iteration n° {str(self.i).zfill(2)}. {str2print}")
+
     def set_levelset(self, levelset: Levelset) -> None:
         """ Set the right-hand side source term (force term) and the levelset."""
         if levelset.expression is None:
@@ -502,7 +509,7 @@ class PhiFEMSolver(GenericSolver):
             padding: if True, computes an extra padding layer of cells to increase the chances to keep the level 0 curve of the levelset inside the submesh.
             plot:    if True, plots the mesh tags (very slow).
         """
-        super().print("Mesh tags computation.")
+        self.print("Mesh tags computation.")
 
         working_mesh = self.mesh
         # Tag cells of the background mesh. Used to tag the facets and/or create the submesh.
@@ -558,7 +565,7 @@ class PhiFEMSolver(GenericSolver):
             dS: ufl.Measure, the facets measure with the facets tags.
             num_dofs: int, the number of degrees of freedom used in the phiFEM approximation.
         """
-        super().print("Variational formulation set up.")
+        self.print("Variational formulation set up.")
 
         if quadrature_degree is None:
             if self.levelset_element is None:
@@ -735,7 +742,7 @@ class PhiFEMSolver(GenericSolver):
             h10_residuals: dictionnary containing all the H1 semi-norm residuals.
             l2_residuals: dictionnary containing all the L2 norm residuals.
         """
-        super().print("Compute estimators.")
+        self.print("Solve linear system.")
 
         if self.solution is None:
             raise ValueError("SOLVER_NAME.solution is None, did you forget to solver ? (SOLVER_NAME.solve)")

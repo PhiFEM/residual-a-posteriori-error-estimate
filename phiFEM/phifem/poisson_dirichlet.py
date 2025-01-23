@@ -113,7 +113,7 @@ def poisson_dirichlet_phiFEM(cl: float,
         v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
         results_saver.add_new_value("dofs", num_dofs)
         phiFEM_solver.assemble()
-        phiFEM_solver.solve(use_fine_space=True)
+        phiFEM_solver.solve()
         uh = phiFEM_solver.get_solution()
         wh = phiFEM_solver.get_solution_wh()
 
