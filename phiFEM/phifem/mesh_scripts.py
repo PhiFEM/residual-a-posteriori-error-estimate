@@ -179,13 +179,11 @@ def reshape_facets_map(f2c_connect: AdjacencyList_int32) -> npt.NDArray[np.int32
 # ...and butchered so that we can pass a mesh_tags with more than 2 different tags and display the cells and/or facets indices.
 # TODO: add more line styles for the moment it's not very colorblind friendly.
 # TODO: plot_mesh_tags is broken...
-def plot_mesh_tags(
-    mesh: Mesh,
-    mesh_tags: MeshTags,
-    ax: plt.Axes | None = None,
-    display_indices: bool = False,
-    expression_levelset: Callable[..., np.ndarray] | None = None
-) -> plt.Axes:
+def plot_mesh_tags(mesh: Mesh,
+                   mesh_tags: MeshTags,
+                   ax: plt.Axes | None = None,
+                   display_indices: bool = False,
+                   expression_levelset: Callable[..., np.ndarray] | None = None) -> plt.Axes:
     """Plot a mesh tags object on the provided (or, if None, the current) axes object.
     
     Args:
