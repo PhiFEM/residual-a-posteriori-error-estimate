@@ -516,11 +516,8 @@ class PhiFEMSolver(GenericSolver):
         if self.levelset is None:
             raise ValueError("SOLVER_NAME.levelset is None, did you forget to set the levelset ? (SOLVER_NAME.set_levelset)")
 
-        V_mesh = dfx.fem.functionspace(working_mesh, self.levelset_element)
-        levelset_discrete = self.levelset.interpolate(V_mesh)
-
-        self.bg_mesh_cells_tags = tag_entities(working_mesh,
-                                               levelset_discrete,
+        self.bg_mesh_cells_tags = tag_entities(self.mesh,
+                                               self.levelset,
                                                self.mesh.topology.dim,
                                                padding=padding,
                                                plot=plot)

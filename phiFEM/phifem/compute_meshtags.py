@@ -1,5 +1,4 @@
 import dolfinx as dfx
-from dolfinx.fem import Function, FunctionSpace
 from dolfinx.mesh import Mesh, MeshTags
 from dolfinx import cpp
 import matplotlib.pyplot as plt
@@ -11,28 +10,8 @@ from typing import Any, Tuple
 
 # TODO: Modify to use in parallel
 
-def _locate_entities(levelset_discrete: Function,
-                     edim: int) -> npt.NDArray[np.int32]:
-    """ Select entities containing dofs in which levelset_discrete is negative.
-    
-    Args:
-        levelset_discrete: the discretization of the levelset.
-        edim: the dimension of the entities to select.
-    
-    Returns:
-        The list of entities.
-    """
-    levelset_space = levelset_discrete.function_space
-
-    selected_dofs = np.argwhere(levelset_discrete.x.array[:] < 0.)
-    
-    dofmap = levelset_space.dofmap
-    print(dofmap.)
-    assert 1==2
-
-
 def _select_entities(mesh: Mesh,
-                     levelset_discrete: Function,
+                     levelset: Levelset,
                      edim: int,
                      padding: bool =False) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32]] | Tuple[npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32]]:
     """ Compute the list of entities strictly inside Omega_h and the list of entities having a non-empty intersection with Gamma_h.
@@ -51,7 +30,9 @@ def _select_entities(mesh: Mesh,
     entities: npt.NDArray[np.int32] = np.arange(mesh.topology.index_map(edim).size_global, dtype = np.int32) # TODO: change this line to allow parallel computing
 
     # List entities that are stricly included in Omega_h
-    list_interior_entities: npt.NDArray[Any] = _locate_entities(levelset_discrete, edim)
+    list_interior_entities: npt.NDArray[Any] = dfx.mesh.locate_entities(mesh,
+                                                                        edim,
+                                                                        levelset.interior(0.))
 
     # List entities that are strictly excluded from Omega_h
     exterior_entities: npt.NDArray[Any] = dfx.mesh.locate_entities(mesh,
@@ -79,7 +60,7 @@ def _select_entities(mesh: Mesh,
         return list_interior_entities, cut_entities, exterior_entities
 
 def tag_entities(mesh: Mesh,
-                 levelset_discrete: Function,
+                 levelset: Levelset,
                  edim: int,
                  cells_tags: MeshTags | None = None,
                  padding: bool = False,
@@ -93,7 +74,7 @@ def tag_entities(mesh: Mesh,
 
     Args:
         mesh: the background mesh.
-        levelset_discrete: the discretization of the levelset.
+        levelset: a Levelset object.
         edim: dimension of the entities.
         cells_tags: the cells tags.
 
@@ -105,9 +86,9 @@ def tag_entities(mesh: Mesh,
     cdim: int = mesh.topology.dim
     if cells_tags is None:
         if padding:
-            interior_entities, cut_fronteer_entities, exterior_entities, padding_entities = _select_entities(mesh, levelset_discrete, cdim, padding=padding)
+            interior_entities, cut_fronteer_entities, exterior_entities, padding_entities = _select_entities(mesh, levelset, cdim, padding=padding)
         else:
-            interior_entities, cut_fronteer_entities, exterior_entities = _select_entities(mesh, levelset_discrete, cdim, padding=padding)
+            interior_entities, cut_fronteer_entities, exterior_entities = _select_entities(mesh, levelset, cdim, padding=padding)
     else:
         interior_entities     = cells_tags.find(1)
         cut_fronteer_entities = cells_tags.find(2)
@@ -132,7 +113,7 @@ def tag_entities(mesh: Mesh,
             boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
                                              c2f_map[exterior_entities])
 
-        interior_fronteer_facets, cut_facets, exterior_facets = _select_entities(mesh, levelset_discrete, edim)
+        interior_fronteer_facets, cut_facets, exterior_facets = _select_entities(mesh, levelset, edim)
         interior_facets = np.setdiff1d(interior_fronteer_facets, interior_boundary_facets)
         cut_facets = np.union1d(cut_facets, interior_boundary_facets)
         exterior_facets = np.setdiff1d(exterior_facets, boundary_facets)
@@ -181,12 +162,12 @@ def tag_entities(mesh: Mesh,
                                       entities_indices[sorted_indices],
                                       entities_markers[sorted_indices])
     
-    # if plot:
-    #     figure, ax = plt.subplots()
-    #     plot_mesh_tags(mesh, entities_tags, ax=ax, display_indices=False, expression_levelset=levelset.expression)
-    #     if edim == mesh.topology.dim:
-    #         ename = "cells"
-    #     else:
-    #         ename = "facets"
-    #     plt.savefig(f"./{ename}_tags.svg", format="svg", dpi=2400, bbox_inches="tight")
+    if plot:
+        figure, ax = plt.subplots()
+        plot_mesh_tags(mesh, entities_tags, ax=ax, display_indices=False, expression_levelset=levelset.expression)
+        if edim == mesh.topology.dim:
+            ename = "cells"
+        else:
+            ename = "facets"
+        plt.savefig(f"./{ename}_tags.svg", format="svg", dpi=2400, bbox_inches="tight")
     return entities_tags
