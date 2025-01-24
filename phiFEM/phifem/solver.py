@@ -336,7 +336,7 @@ class GenericSolver:
             eta_h = self.eta_h_L2
         else:
             raise ValueError("Marking has been called but the refinement strategy ref_strat is 'uniform' (must be 'H10' or 'L2').")
-        
+
         mesh = eta_h.function_space.mesh
         cdim = mesh.topology.dim
         fdim = cdim - 1
