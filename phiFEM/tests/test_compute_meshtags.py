@@ -5,7 +5,7 @@ import pytest
 from phiFEM.phifem.compute_meshtags import tag_entities
 from phiFEM.phifem.continuous_functions import Levelset
 import os
-from test_outward_normal import create_disk
+from test_outward_normal import create_disk # type: ignore
 
 
 """

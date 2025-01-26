@@ -2,22 +2,23 @@ from   basix.ufl import element
 from   collections.abc import Callable
 from   contourpy import contour_generator
 import dolfinx as dfx
-from   dolfinx.cpp.graph import AdjacencyList_int32
+from   dolfinx.cpp.graph import AdjacencyList_int32 # type: ignore
 from   dolfinx.mesh import Mesh, MeshTags
 from   dolfinx.fem import Function
-from   mpl_toolkits.axes_grid1 import make_axes_locatable
+from   mpl_toolkits.axes_grid1 import make_axes_locatable # type: ignore
+from matplotlib import cm
 import matplotlib.collections as mpl_collections
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.tri as tri
-import meshio
+import meshio # type: ignore
 import numpy as np
 import numpy.typing as npt
 import os
 from   os import PathLike
-import pygmsh
-from   typing import cast
-import ufl
+import pygmsh # type: ignore
+from   typing import cast, Any, Collection
+import ufl # type: ignore
 from   ufl import inner, grad
 from   phiFEM.phifem.utils import immutable
 from   lxml import etree
@@ -204,7 +205,8 @@ def plot_mesh_tags(
     points = mesh.geometry.x
 
     # Get unique tags and create a custom colormap
-    colors = [plt.cm.tab10(i / 10.) for i in range(10)]
+    tab10 = mcolors.Colormap("tab10")
+    colors = [tab10(i / 10.) for i in range(10)]
     colors = colors[:5]
     cmap = mcolors.ListedColormap(colors) # type: ignore
     norm = mcolors.BoundaryNorm(np.arange(6) - 0.5, 5)
@@ -213,6 +215,7 @@ def plot_mesh_tags(
     cells_map = mesh.topology.index_map(mesh.topology.dim)
     num_cells = cells_map.size_local + cells_map.num_ghosts
 
+    mappable: mpl_collections.Collection
     if mesh_tags.dim == mesh.topology.dim:
         cells = mesh.geometry.dofmap
         tria = tri.Triangulation(points[:, 0], points[:, 1], cells)
@@ -233,8 +236,11 @@ def plot_mesh_tags(
                     ax.text(midpoint[0], midpoint[1], f"{c}", horizontalalignment="center", verticalalignment="center", fontsize=6)
             else:
                 cell_colors[c] = -1  # Handle cells without tags (optional)
-        mappable: mpl_collections.Collection = ax.tripcolor(
-            tria, cell_colors, edgecolor="k", cmap=cmap, norm=norm)
+        mappable = ax.tripcolor(tria,
+                                cell_colors,
+                                edgecolor="k",
+                                cmap=cmap,
+                                norm=norm)
         tag_dict = {0: "No tag",
                     1: "Interior cells",
                     2: "Cut cells",
@@ -268,10 +274,14 @@ def plot_mesh_tags(
                 if display_indices:
                     midpoint = np.sum(points[vertices], axis=0)/np.shape(points[vertices])[0]
                     ax.text(midpoint[0], midpoint[1], f"{f}", horizontalalignment="center", verticalalignment="center", fontsize=6)
-        mappable: mpl_collections.Collection = mpl_collections.LineCollection(
-            lines, cmap=cmap, norm=norm, colors=lines_colors_as_str, linestyles=lines_linestyles, linewidth=0.5)
+        mappable = mpl_collections.LineCollection(lines,
+                                                  cmap=cmap,
+                                                  norm=norm,
+                                                  colors=lines_colors_as_str,
+                                                  linestyles=lines_linestyles,
+                                                  linewidth=0.5)
         mappable.set_array(np.array(lines_colors_as_int))
-        ax.add_collection(mappable)
+        ax.add_collection(cast(Collection[Any], mappable))
         ax.autoscale()
         tag_dict = {0: "No tag",
                     1: "Interior facets",

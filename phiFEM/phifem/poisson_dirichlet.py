@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 import os
 from   os import PathLike
-from   petsc4py.PETSc import Options, KSP
+from   petsc4py.PETSc import Options, KSP # type: ignore[attr-defined]
 from   typing import Tuple
 
 from phiFEM.phifem.solver import PhiFEMSolver, FEMSolver
@@ -149,8 +149,9 @@ def poisson_dirichlet_phiFEM(cl: float,
             results_saver.save_mesh    (working_mesh,        f"mesh_{str(i).zfill(2)}")
 
         if compute_exact_error:
-            solution_degree = phiFEM_solver.solution.function_space.element.basix_element.degree
-            levelset_degree = phiFEM_solver.levelset_space.element.basix_element.degree
+            solution_degree = wh.function_space.element.basix_element.degree
+            levelset_space = phiFEM_solver.get_levelset_space()
+            levelset_degree = levelset_space.element.basix_element.degree
             ref_degree = solution_degree + levelset_degree + 1
             phiFEM_solver.compute_exact_error(results_saver,
                                               ref_degree= ref_degree,

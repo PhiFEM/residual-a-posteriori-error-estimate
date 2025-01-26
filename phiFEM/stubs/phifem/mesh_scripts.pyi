@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from dolfinx.cpp.graph import AdjacencyList_int32
+from dolfinx.cpp.graph import AdjacencyList_int32 # type: ignore
 from dolfinx.mesh import Mesh, MeshTags
 from dolfinx.fem import Function
 from   matplotlib.axes import Axes

@@ -2,9 +2,9 @@ import dolfinx as dfx
 from dolfinx.io import XDMFFile
 from lxml import etree
 from mpi4py import MPI
-import meshio
+import meshio # type: ignore
 import numpy as np
-import pygmsh as pg
+import pygmsh as pg # type: ignore
 import pytest
 import os
 

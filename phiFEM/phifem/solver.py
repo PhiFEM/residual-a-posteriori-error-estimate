@@ -10,14 +10,14 @@ import numpy as np
 import numpy.typing as npt
 import os
 from   os import PathLike
-from   petsc4py.PETSc import Options as PETSc_Options
-from   petsc4py.PETSc import KSP     as PETSc_KSP
-from   petsc4py.PETSc import Mat     as PETSc_Mat
-from   petsc4py.PETSc import Vec     as PETSc_Vec
-from   typing import Any, Tuple
-import ufl
+from   petsc4py.PETSc import Options as PETSc_Options # type: ignore[attr-defined]
+from   petsc4py.PETSc import KSP     as PETSc_KSP # type: ignore[attr-defined]
+from   petsc4py.PETSc import Mat     as PETSc_Mat # type: ignore[attr-defined]
+from   petsc4py.PETSc import Vec     as PETSc_Vec # type: ignore[attr-defined]
+from   typing import Any, cast, Tuple
+import ufl # type: ignore[import-untyped]
 from   ufl import inner, jump, grad, div, avg
-from   ufl.classes import Measure
+from   ufl.classes import Measure # type: ignore[import-untyped]
 
 from phiFEM.phifem.compute_meshtags import tag_entities
 from phiFEM.phifem.continuous_functions import ContinuousFunction, ExactSolution, Levelset
@@ -138,7 +138,7 @@ class GenericSolver:
 
         output_dir = results_saver.output_path
 
-        FEM_dir_list = [subdir if subdir!="output_phiFEM" else "output_FEM" for subdir in output_dir.split(sep=os.sep)]
+        FEM_dir_list = [subdir if subdir!="output_phiFEM" else "output_FEM" for subdir in cast(str, output_dir).split(sep=os.sep)]
         FEM_dir = os.path.join("/", *(FEM_dir_list))
 
         if reference_mesh_path is None:
@@ -215,6 +215,7 @@ class GenericSolver:
             u_exact_ref = u_exact.interpolate(reference_space)
 
         if save_exact_solution:
+            assert u_exact_ref is not None, "u_exact_ref is None."
             if ref_degree > 1:
                 CG1Element = element("Lagrange", reference_mesh.topology.cell_name(), 1)
                 reference_V = dfx.fem.functionspace(reference_mesh, CG1Element)
@@ -411,7 +412,7 @@ class PhiFEMSolver(GenericSolver):
         self.facets_tags: MeshTags | None         = None
         self.FE_space: FunctionSpace | None       = None
         self.levelset: Levelset | None            = None
-        self.levelset_element: _ElementBase | None
+        self.levelset_element: _ElementBase
         if levelset_element is None:
             self.levelset_element = FE_element
         else:
@@ -481,6 +482,7 @@ class PhiFEMSolver(GenericSolver):
         """ Print the state of the solver."""
         if self.save_output:
             FE_degree = self.FE_element.basix_element.degree
+
             levelset_degree = self.levelset_element.basix_element.degree
             print(f"Solver: {self.solver_type}. Refinement: {self.ref_strat}. FE degree: {FE_degree}. Levelset degree: {levelset_degree}. Use fine space: {str(self.use_fine_space)}. Iteration n° {str(self.i).zfill(2)}. {str2print}")
 
@@ -709,8 +711,10 @@ class PhiFEMSolver(GenericSolver):
             raise TypeError("SOLVER_NAME.solution_wh is None.")
 
         if self.use_fine_space:
+            assert self.FE_space is not None, "SOLVER_NAME.FE_space is None."
             FE_degree       = self.FE_space.element.basix_element.degree
             levelset_degree = self.levelset_space.element.basix_element.degree
+            assert self.submesh is not None, "SOLVER_NAME.submesh is None."
             SolutionElement = element("Lagrange", self.submesh.topology.cell_name(), FE_degree + levelset_degree)
             SolutionSpace = dfx.fem.functionspace(self.submesh, SolutionElement)
         else:
@@ -727,10 +731,15 @@ class PhiFEMSolver(GenericSolver):
             raise ValueError("SOLVER_NAME.solution_wh is None, did you forget to solve ? (SOLVER_NAME.solve)")
         return self.solution_wh
     
+    def get_levelset_space(self) -> FunctionSpace:
+        if self.levelset_space is None:
+            raise ValueError("SOLVER_NAME.levelset_space is None, did you forget to set the variational formulation ? (SOLVER_NAME.set_variational_formulation)")
+        return self.levelset_space
+
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
                           quadrature_degree: int | None = None,
-                          boundary_term: bool = False) -> Tuple[dict[str, Any], dict[str, Any]]:
+                          boundary_term: bool = False) -> Tuple[dict[str, Any], dict[str, Any], Function]:
         """ Compute the local and global contributions of the residual a posteriori error estimators for the H10 and L2 norms.
 
         Args:
@@ -784,6 +793,8 @@ class PhiFEMSolver(GenericSolver):
         J_h = jump(grad(uh), -n)
 
         # Boundary correction function as (phi_h - I_h phi) w_h, where I_h phi is an interpolation of phi into a finer space.
+        assert self.levelset_space is not None, "SOLVER_NAME.levelset_space is None."
+        assert self.levelset is not None, "SOLVER_NAME.levelset is None."
         phih = self.levelset.interpolate(self.levelset_space)
 
         levelset_degree = self.levelset_space.element.basix_element.degree
@@ -791,6 +802,7 @@ class PhiFEMSolver(GenericSolver):
         Vf = dfx.fem.functionspace(working_mesh, CGfElement)
 
         # Get the dofs except those on the cut cells
+        assert self.submesh_cells_tags is not None, "SOLVER_NAME.submesh_cells_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)"
         cut_cells = self.submesh_cells_tags.find(2)
         cut_cells_dofs = dfx.fem.locate_dofs_topological(Vf, 2, cut_cells)
         num_dofs_global = Vf.dofmap.index_map.size_global * Vf.dofmap.index_map_bs
@@ -804,6 +816,7 @@ class PhiFEMSolver(GenericSolver):
         phi2.interpolate(self.levelset)
 
         wh2 = dfx.fem.Function(Vf)
+        assert self.solution_wh is not None, "SOLVER_NAME.solution_wh is None, did you forget to solve ?(SOLVER_NAME.solve)"
         wh2.interpolate(self.solution_wh)
 
         correction_function = dfx.fem.Function(Vf)
@@ -964,11 +977,12 @@ class FEMSolver(GenericSolver):
     def solve(self) -> None:
         super().solve()
         self.solution = dfx.fem.Function(self.FE_space)
+        assert self.solution_wh is not None, "SOLVER_NAME.solution_wh is None, did you forget to solve ? (SOLVER_NAME.solve)"
         self.solution.x.array[:] = self.solution_wh.x.array[:]
 
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
-                          quadrature_degree: int | None = None) -> None:
+                          quadrature_degree: int | None = None) -> Tuple[dict[str, Any], dict[str, Any]]:
         """ Compute the local and global contributions of the residual a posteriori error estimators for the H10 and L2 norms.
 
         Args:
