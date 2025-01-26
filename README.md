@@ -24,15 +24,20 @@ sudo -E bash run_image.sh
 ```
 
 ## Run an example (inside the container from the root directory):
+Replace `TEST_CASE` by one of the available test cases:
+```bash
+cd demo/TEST_CASE/
+```
 The `main.py` scripts have the following parameters:
 ```bash
-python3 main.py SOLVER SIZE_INIT_MESH NUM_REF_STEPS REFINEMENT_MODE
+python3 main.py SOLVER SIZE_INIT_MESH NUM_REF_STEPS REFINEMENT_MODE (--exact_error)
 ```
 where
 - `SOLVER` defines the FE solver (`str` among `FEM` or `phiFEM`),
 - `SIZE_INIT_MESH` defines the size of the initial mesh (`float`),
 - `NUM_REF_STEPS` defines the number of refinement steps (`int`),
 - `REFINEMENT_MODE` defines the refinement strategy to use (`str` among `uniform`, `H10` or `L2` --adaptive refinement based on the H10 or L2 error estimator--).
+- `--exact_error` flag to compute a higher order approximation of the exact errors (requires to first run `main.py` with solver as `FEM`). Since this computation is based on solves of the FE problem on finer meshes and/or higher order spaces, this can drastically slow the computation and require more computational resources.
 
 Example:
 ```bash
