@@ -10,14 +10,14 @@ import numpy as np
 import numpy.typing as npt
 import os
 from   os import PathLike
-from   petsc4py.PETSc import Options as PETSc_Options
-from   petsc4py.PETSc import KSP     as PETSc_KSP
-from   petsc4py.PETSc import Mat     as PETSc_Mat
-from   petsc4py.PETSc import Vec     as PETSc_Vec
-from   typing import Any, Tuple
-import ufl
+from   petsc4py.PETSc import Options as PETSc_Options # type: ignore[attr-defined]
+from   petsc4py.PETSc import KSP     as PETSc_KSP # type: ignore[attr-defined]
+from   petsc4py.PETSc import Mat     as PETSc_Mat # type: ignore[attr-defined]
+from   petsc4py.PETSc import Vec     as PETSc_Vec # type: ignore[attr-defined]
+from   typing import Any, cast, Tuple
+import ufl # type: ignore[import-untyped]
 from   ufl import inner, jump, grad, div, avg
-from   ufl.classes import Measure
+from   ufl.classes import Measure # type: ignore[import-untyped]
 
 from phiFEM.phifem.compute_meshtags import tag_entities
 from phiFEM.phifem.continuous_functions import ContinuousFunction, ExactSolution, Levelset
@@ -52,6 +52,8 @@ class GenericSolver:
         self.bilinear_form: Form | None     = None
         self.eta_h_H10: Function | None     = None
         self.eta_h_L2: Function | None      = None
+        self.err_H10: Function | None       = None
+        self.err_L2: Function | None        = None
         self.FE_element: _ElementBase       = FE_element
         self.FE_space: FunctionSpace | None = None
         self.i: int                         = num_step
@@ -61,6 +63,7 @@ class GenericSolver:
         self.ref_strat: str                 = ref_strat
         self.rhs: ContinuousFunction | None = None
         self.save_output: bool              = save_output
+        self.solution_wh: Function | None   = None
         self.solution: Function | None      = None
         self.bcs: list[Any]                 = []
         self.solver_type: str               = "Generic"
@@ -69,7 +72,7 @@ class GenericSolver:
         """ Set the source term data.
 
         Args:
-            source_term: ContinuousFunction object, the right-hand side data (force term).
+            source_term: the right-hand side data.
         """
         if source_term.expression is None:
             raise ValueError("The source term has no expression.")
@@ -93,7 +96,8 @@ class GenericSolver:
     def print(self, str2print: str) -> None:
         """ Print the state of the solver."""
         if self.save_output:
-            print(f"Solver: {self.solver_type}. Refinement: {self.ref_strat}. Iteration n° {str(self.i).zfill(2)}. {str2print}")
+            FE_degree = self.FE_element.basix_element.degree
+            print(f"Solver: {self.solver_type}. Refinement: {self.ref_strat}. FE degree: {FE_degree}. Iteration n° {str(self.i).zfill(2)}. {str2print}")
     
     def solve(self) -> None:
         """ Solve the FE linear system."""
@@ -106,9 +110,9 @@ class GenericSolver:
         if self.b is None:
             raise ValueError("SOLVER_NAME.b is None, did you forget to assemble ? (SOLVER_NAME.assemble)")
     
-        self.solution = dfx.fem.Function(self.FE_space)
+        self.solution_wh = dfx.fem.Function(self.FE_space)
         self.petsc_solver.setOperators(self.A)
-        self.petsc_solver.solve(self.b, self.solution.vector)
+        self.petsc_solver.solve(self.b, self.solution_wh.vector)
     
     def compute_exact_error(self,
                             results_saver: ResultsSaver,
@@ -122,19 +126,19 @@ class GenericSolver:
         """ Compute reference approximations to the exact errors in H10 and L2 norms.
 
         Args:
-            results_saver: Saver object, the saver.
-            expression_u_exact: (optional) method, the expression of the exact solution (if None, a reference solution is computed on a finer reference mesh).
-            save_output: (optional) bool, if True, save the functions, meshes and values to the disk.
-            extra_ref: (optional) int, the number of extra uniform refinements to get the reference mesh.
-            ref_degree: (optional) int, the degree of the finite element used to compute the approximations to the exact errors.
+            results_saver:         the saver.
+            expression_u_exact:    the expression of the exact solution (if None, a reference solution is computed on a finer reference mesh).
+            save_output:           if True, save the functions, meshes and values to the disk.
+            extra_ref:             the number of extra uniform refinements to get the reference mesh.
+            ref_degree:            the degree of the finite element used to compute the approximations to the exact errors.
             interpolation_padding: padding for non-matching mesh interpolation.
-            reference_mesh_path: (optional) os.Path object or str, the path to the reference mesh.
+            reference_mesh_path:   the path to the reference mesh.
         """
         self.print("Compute exact errors.")
 
         output_dir = results_saver.output_path
 
-        FEM_dir_list = [subdir if subdir!="output_phiFEM" else "output_FEM" for subdir in output_dir.split(sep=os.sep)]
+        FEM_dir_list = [subdir if subdir!="output_phiFEM" else "output_FEM" for subdir in cast(str, output_dir).split(sep=os.sep)]
         FEM_dir = os.path.join("/", *(FEM_dir_list))
 
         if reference_mesh_path is None:
@@ -211,6 +215,7 @@ class GenericSolver:
             u_exact_ref = u_exact.interpolate(reference_space)
 
         if save_exact_solution:
+            assert u_exact_ref is not None, "u_exact_ref is None."
             if ref_degree > 1:
                 CG1Element = element("Lagrange", reference_mesh.topology.cell_name(), 1)
                 reference_V = dfx.fem.functionspace(reference_mesh, CG1Element)
@@ -250,6 +255,7 @@ class GenericSolver:
 
         L2_norm_local_form = dfx.fem.form(L2_norm_local)
         L2_norm_local_form_assembled = assemble_vector(L2_norm_local_form)
+        self.err_L2 = L2_norm_local_form_assembled
         L2_error_0.x.array[:] = L2_norm_local_form_assembled.array
         L2_error_global = np.sqrt(sum(L2_norm_local_form_assembled.array))
 
@@ -260,6 +266,7 @@ class GenericSolver:
 
         H10_norm_local_form = dfx.fem.form(H10_norm_local)
         H10_norm_local_form_assembled = assemble_vector(H10_norm_local_form)
+        self.err_H10 = H10_norm_local_form_assembled
         H10_error_0.x.array[:] = H10_norm_local_form_assembled.array
         H10_error_global = np.sqrt(sum(H10_norm_local_form_assembled.array))
 
@@ -268,15 +275,55 @@ class GenericSolver:
 
         results_saver.add_new_value("H10 error", H10_error_global)
 
+        # We reinterpolate the local exact errors back to the current mesh for an easier comparison with the estimators
+        DG0Element_current_mesh = element("DG", current_mesh.topology.cell_name(), 0)
+        V0_current_mesh = dfx.fem.functionspace(current_mesh, DG0Element_current_mesh)
+        L2_error_0_current_mesh = dfx.fem.Function(V0_current_mesh)
+
+        nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
+                            L2_error_0_current_mesh.function_space.mesh,
+                            L2_error_0_current_mesh.function_space.element,
+                            L2_error_0.function_space.mesh, padding=interpolation_padding)
+        L2_error_0_current_mesh.interpolate(L2_error_0, nmm_interpolation_data=nmm)
+
+        H10_error_0_current_mesh = dfx.fem.Function(V0_current_mesh)
+
+        nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
+                            H10_error_0_current_mesh.function_space.mesh,
+                            H10_error_0_current_mesh.function_space.element,
+                            H10_error_0.function_space.mesh, padding=interpolation_padding)
+        H10_error_0_current_mesh.interpolate(H10_error_0, nmm_interpolation_data=nmm)
+
         if save_output:
-            results_saver.save_function(L2_error_0,  f"L2_error_{str(self.i).zfill(2)}")
-            results_saver.save_function(H10_error_0, f"H10_error_{str(self.i).zfill(2)}")
+            results_saver.save_function(L2_error_0_current_mesh,  f"L2_error_{str(self.i).zfill(2)}")
+            results_saver.save_function(H10_error_0_current_mesh, f"H10_error_{str(self.i).zfill(2)}")
     
+    def compute_efficiency_coef(self,
+                                results_saver: ResultsSaver,
+                                norm: str ="H10") -> None:
+        assert norm in ["H10", "L2"], "The norm must be 'H10' or 'L2'."
+
+        if norm=="H10":
+            eta_h = self.eta_h_H10
+            err   = self.err_H10
+        elif norm=="L2":
+            eta_h = self.eta_h_L2
+            err   = self.err_L2
+        
+        if (eta_h is not None) and (err is not None):
+            eta_global = np.sqrt(sum(eta_h.x.array))
+            err_global = np.sqrt(sum(err.array))
+            eff_coef = eta_global/err_global
+            results_saver.add_new_value(f"{norm} efficiency", eff_coef)
+        else:
+            raise ValueError(f"The {norm} estimator or exact error is missing, did you forget to compute them ? (SOLVER_NAME.estimate_residual or SOLVER_NAME.compute_exact_errors)")
+
+
     def marking(self, theta: float = 0.3) -> npt.NDArray[np.float64]:
         """ Perform maximum marking strategy.
 
         Args:
-            theta: (optional) float, the marking parameter (select the cells with the 100*theta% highest estimator values).
+            theta: the marking parameter (select the cells with the 100*theta% highest estimator values).
         """
         self.print("Mark mesh.")
 
@@ -290,7 +337,7 @@ class GenericSolver:
             eta_h = self.eta_h_L2
         else:
             raise ValueError("Marking has been called but the refinement strategy ref_strat is 'uniform' (must be 'H10' or 'L2').")
-        
+
         mesh = eta_h.function_space.mesh
         cdim = mesh.topology.dim
         fdim = cdim - 1
@@ -339,6 +386,7 @@ class PhiFEMSolver(GenericSolver):
                  PETSc_solver: PETSc_KSP,
                  ref_strat: str = "uniform",
                  levelset_element: _ElementBase | None = None,
+                 use_fine_space: bool = False,
                  num_step: int = 0,
                  save_output: bool = True) -> None:
         """ Initialize a phiFEM solver object.
@@ -349,6 +397,7 @@ class PhiFEMSolver(GenericSolver):
             PETSc_solver: the PETSc solver used to solve the finite element linear system.
             ref_strat: the refinement strategy ('uniform' for uniform refinement, 'H10' for adaptive refinement based on the H10 residual estimator, 'L2' for adaptive refinement based on the L2 residual estimator).
             levelset_element: the finite element used to discretize the levelset function.
+            use_fine_space: use the proper fine space for the phiFEM solution (i.e. space of degree FE_degree + levelset_degree).
             num_step: the refinement step number.
             save_output: if True, save the functions, meshes and values to the disk.
         """
@@ -363,7 +412,7 @@ class PhiFEMSolver(GenericSolver):
         self.facets_tags: MeshTags | None         = None
         self.FE_space: FunctionSpace | None       = None
         self.levelset: Levelset | None            = None
-        self.levelset_element: _ElementBase | None
+        self.levelset_element: _ElementBase
         if levelset_element is None:
             self.levelset_element = FE_element
         else:
@@ -372,7 +421,9 @@ class PhiFEMSolver(GenericSolver):
         self.solver_type: str                     = "phiFEM"
         self.submesh: Mesh | None                 = None
         self.submesh_cells_tags: MeshTags | None  = None
+        self.use_fine_space: bool                 = use_fine_space
         self.v0: Function | None                  = None
+        self.v0_gamma: Function | None            = None
 
     def _compute_normal(self, mesh: Mesh) -> Function:
         """ Private method used to compute the outward normal to Omega_h.
@@ -427,6 +478,14 @@ class PhiFEMSolver(GenericSolver):
                                                     cells_indices[sorted_indices],
                                                     cells_markers[sorted_indices])
 
+    def print(self, str2print: str) -> None:
+        """ Print the state of the solver."""
+        if self.save_output:
+            FE_degree = self.FE_element.basix_element.degree
+
+            levelset_degree = self.levelset_element.basix_element.degree
+            print(f"Solver: {self.solver_type}. Refinement: {self.ref_strat}. FE degree: {FE_degree}. Levelset degree: {levelset_degree}. Use fine space: {str(self.use_fine_space)}. Iteration n° {str(self.i).zfill(2)}. {str2print}")
+
     def set_levelset(self, levelset: Levelset) -> None:
         """ Set the right-hand side source term (force term) and the levelset."""
         if levelset.expression is None:
@@ -450,9 +509,9 @@ class PhiFEMSolver(GenericSolver):
 
         Args:
             padding: if True, computes an extra padding layer of cells to increase the chances to keep the level 0 curve of the levelset inside the submesh.
-            plot: if True, plots the mesh tags (very slow).
+            plot:    if True, plots the mesh tags (very slow).
         """
-        super().print("Mesh tags computation.")
+        self.print("Mesh tags computation.")
 
         working_mesh = self.mesh
         # Tag cells of the background mesh. Used to tag the facets and/or create the submesh.
@@ -508,7 +567,7 @@ class PhiFEMSolver(GenericSolver):
             dS: ufl.Measure, the facets measure with the facets tags.
             num_dofs: int, the number of degrees of freedom used in the phiFEM approximation.
         """
-        super().print("Variational formulation set up.")
+        self.print("Variational formulation set up.")
 
         if quadrature_degree is None:
             if self.levelset_element is None:
@@ -534,6 +593,7 @@ class PhiFEMSolver(GenericSolver):
         
         # Set up a DG function with values 1. in Omega_h and 0. outside
         DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
+        CG1Element = element("CG", working_mesh.topology.cell_name(), 1)
         V0 = dfx.fem.functionspace(working_mesh, DG0Element)
         v0 = dfx.fem.Function(V0)
         v0.vector.set(0.)
@@ -544,9 +604,20 @@ class PhiFEMSolver(GenericSolver):
         # We do not need the dofs here since cells and DG0 dofs share the same indices in dolfinx
         v0.x.array[Omega_h_cells] = 1.
 
+        V1 = dfx.fem.functionspace(working_mesh, CG1Element)
+        v0_gamma = dfx.fem.Function(V1)
+        v0_gamma.vector.set(0.)
+        working_mesh.topology.create_connectivity(2, 2)
+        gamma_dofs = dfx.fem.locate_dofs_topological(V1, 2, cut_cells)
+        v0_gamma.x.array[gamma_dofs] = 1.
+
         with XDMFFile(working_mesh.comm, "output_phiFEM/v0.xdmf", "w") as of:
             of.write_mesh(working_mesh)
             of.write_function(v0)
+
+        with XDMFFile(working_mesh.comm, "output_phiFEM/v0_gamma.xdmf", "w") as of:
+            of.write_mesh(working_mesh)
+            of.write_function(v0_gamma)
         
         # TODO: modify to get it work in parallel
         self.FE_space = dfx.fem.functionspace(working_mesh, self.FE_element)
@@ -625,6 +696,7 @@ class PhiFEMSolver(GenericSolver):
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)
         self.v0 = v0
+        self.v0_gamma = v0_gamma
         return v0, dx, dS, num_dofs
     
     def solve(self) -> None:
@@ -635,25 +707,51 @@ class PhiFEMSolver(GenericSolver):
             raise TypeError("SOLVER_NAME.levelset is None.")
         if self.levelset_space is None:
             raise TypeError("SOLVER_NAME.levelset_space is None.")
-        if self.solution is None:
-            raise TypeError("SOLVER_NAME.solution is None.")
-        phi_h = self.levelset.interpolate(self.levelset_space)
-        wh = dfx.fem.Function(self.levelset_space)
-        wh.interpolate(self.solution)
-        self.solution.x.array[:] = wh.x.array * phi_h.x.array
+        if self.solution_wh is None:
+            raise TypeError("SOLVER_NAME.solution_wh is None.")
+
+        if self.use_fine_space:
+            assert self.FE_space is not None, "SOLVER_NAME.FE_space is None."
+            FE_degree       = self.FE_space.element.basix_element.degree
+            levelset_degree = self.levelset_space.element.basix_element.degree
+            assert self.submesh is not None, "SOLVER_NAME.submesh is None."
+            SolutionElement = element("Lagrange", self.submesh.topology.cell_name(), FE_degree + levelset_degree)
+            SolutionSpace = dfx.fem.functionspace(self.submesh, SolutionElement)
+        else:
+            SolutionSpace = self.levelset_space
+
+        phi_h = self.levelset.interpolate(SolutionSpace)
+        wh = dfx.fem.Function(SolutionSpace)
+        wh.interpolate(self.solution_wh)
+        self.solution = dfx.fem.Function(SolutionSpace)
+        self.solution.x.array[:] = wh.x.array[:] * phi_h.x.array[:]
+
+    def get_solution_wh(self) -> Function:
+        if self.solution_wh is None:
+            raise ValueError("SOLVER_NAME.solution_wh is None, did you forget to solve ? (SOLVER_NAME.solve)")
+        return self.solution_wh
     
+    def get_levelset_space(self) -> FunctionSpace:
+        if self.levelset_space is None:
+            raise ValueError("SOLVER_NAME.levelset_space is None, did you forget to set the variational formulation ? (SOLVER_NAME.set_variational_formulation)")
+        return self.levelset_space
+
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
                           quadrature_degree: int | None = None,
-                          boundary_term: bool = False) -> None:
+                          boundary_term: bool = False) -> Tuple[dict[str, Any], dict[str, Any], Function]:
         """ Compute the local and global contributions of the residual a posteriori error estimators for the H10 and L2 norms.
 
         Args:
-            V0: (optional) dolfinx.fem.FunctionSpace, the function space in which the local contributions of the residual estimators are interpolated.
-            quadrature_degree: (optional) int, the quadrature degree used in the integrals of the residual estimator.
-            boundary_term: (optional) bool, if True, the boundary term inner(inner(uh, n), w0) * ds is added to the residual estimator.
+            V0: the function space in which the local contributions of the residual estimators are interpolated.
+            quadrature_degree: the quadrature degree used in the integrals of the residual estimator.
+            boundary_term: if True, the boundary term inner(inner(uh, n), w0) * ds is added to the residual estimator.
+
+        Returns:
+            h10_residuals: dictionnary containing all the H1 semi-norm residuals.
+            l2_residuals: dictionnary containing all the L2 norm residuals.
         """
-        super().print("Compute estimators.")
+        self.print("Solve linear system.")
 
         if self.solution is None:
             raise ValueError("SOLVER_NAME.solution is None, did you forget to solver ? (SOLVER_NAME.solve)")
@@ -694,6 +792,46 @@ class PhiFEMSolver(GenericSolver):
         r = f_h + div(grad(uh))
         J_h = jump(grad(uh), -n)
 
+        # Boundary correction function as (phi_h - I_h phi) w_h, where I_h phi is an interpolation of phi into a finer space.
+        assert self.levelset_space is not None, "SOLVER_NAME.levelset_space is None."
+        assert self.levelset is not None, "SOLVER_NAME.levelset is None."
+        phih = self.levelset.interpolate(self.levelset_space)
+
+        levelset_degree = self.levelset_space.element.basix_element.degree
+        CGfElement = element("Lagrange", working_mesh.topology.cell_name(), levelset_degree + 1)
+        Vf = dfx.fem.functionspace(working_mesh, CGfElement)
+
+        # Get the dofs except those on the cut cells
+        assert self.submesh_cells_tags is not None, "SOLVER_NAME.submesh_cells_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)"
+        cut_cells = self.submesh_cells_tags.find(2)
+        cut_cells_dofs = dfx.fem.locate_dofs_topological(Vf, 2, cut_cells)
+        num_dofs_global = Vf.dofmap.index_map.size_global * Vf.dofmap.index_map_bs
+        all_dofs = np.arange(num_dofs_global)
+        uncut_cells_dofs = np.setdiff1d(all_dofs, cut_cells_dofs)
+
+        phih_2 = dfx.fem.Function(Vf)
+        phih_2.interpolate(phih)
+
+        phi2 = dfx.fem.Function(Vf)
+        phi2.interpolate(self.levelset)
+
+        wh2 = dfx.fem.Function(Vf)
+        assert self.solution_wh is not None, "SOLVER_NAME.solution_wh is None, did you forget to solve ?(SOLVER_NAME.solve)"
+        wh2.interpolate(self.solution_wh)
+
+        correction_function = dfx.fem.Function(Vf)
+        correction_function.x.array[:] = (phih_2.x.array[:] - phi2.x.array[:]) * wh2.x.array[:]
+        correction_function.x.array[uncut_cells_dofs] = 0.
+
+        correction_function_V = dfx.fem.Function(self.FE_space)
+        correction_function_V.interpolate(correction_function)
+        # Boundary correction function as the restriction of uh near the boundary
+        # uh_boundary = dfx.fem.Function(self.FE_space)
+        # uh_boundary.x.array[:] = self.solution_wh.x.array[:] * self.v0_gamma.x.array[:]
+
+        geometry_correction = inner(grad(correction_function),
+                                    grad(correction_function))
+
         if V0 is None:
             DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
             V0 = dfx.fem.functionspace(working_mesh, DG0Element)
@@ -709,12 +847,15 @@ class PhiFEMSolver(GenericSolver):
         # Facets residual
         eta_E = avg(h_E) * inner(inner(J_h, J_h), avg(w0)) * avg(self.v0) * (dS(1) + dS(2))
 
-        eta = eta_T + eta_E
+        eta_geometry = inner(geometry_correction, w0) * self.v0 * (dx(1) + dx(2))
 
+        eta = eta_T + eta_E + eta_geometry
+
+        eta_boundary = None
         if boundary_term:
             eta_boundary = h_E * inner(inner(grad(uh), n), inner(grad(uh), n)) * w0 * self.v0 * ds
             eta += eta_boundary
-        
+
         eta_form = dfx.fem.form(eta)
 
         eta_vec = dfx.fem.petsc.assemble_vector(eta_form)
@@ -722,14 +863,24 @@ class PhiFEMSolver(GenericSolver):
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_H10 = eta_h
 
+        h10_residuals = {"Interior residual":       eta_T,
+                         "Internal edges residual": eta_E,
+                         "Geometry residual":       eta_geometry,
+                         "Boundary edges residual": eta_boundary}
+
         """
         L2 estimator
         """
-        eta_T = h_T**4 * inner(inner(r, r), w0) * (dx(1) + dx(2))
-        eta_E = avg(h_E)**3 * inner(inner(J_h, J_h), avg(w0)) * (dS(1) + dS(2))
+        geometry_correction = inner(correction_function,
+                                    correction_function)
 
-        eta = eta_T + eta_E
+        eta_T = h_T**4 * inner(inner(r, r), w0) * self.v0 * (dx(1) + dx(2))
+        eta_E = avg(h_E)**3 * inner(inner(J_h, J_h), avg(w0)) * avg(self.v0) * (dS(1) + dS(2))
+        eta_geometry = inner(geometry_correction, w0) * self.v0 * (dx(1) + dx(2))
 
+        eta = eta_T + eta_E + eta_geometry
+
+        eta_boundary = None
         if boundary_term:
             eta_boundary = h_E**3 * inner(inner(grad(uh), n), inner(grad(uh), n)) * w0 * self.v0 * ds
             eta += eta_boundary
@@ -740,6 +891,11 @@ class PhiFEMSolver(GenericSolver):
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_L2 = eta_h
 
+        l2_residuals = {"Interior residual":       eta_T,
+                        "Internal edges residual": eta_E,
+                        "Geometry residual":       eta_geometry,
+                        "Boundary edges residual": eta_boundary}
+        return h10_residuals, l2_residuals, correction_function_V
 
 class FEMSolver(GenericSolver):
     """ Class representing a FEM solver as a GenericSolver object."""
@@ -818,14 +974,24 @@ class FEMSolver(GenericSolver):
         self.linear_form = dfx.fem.form(L)
         return num_dofs
 
+    def solve(self) -> None:
+        super().solve()
+        self.solution = dfx.fem.Function(self.FE_space)
+        assert self.solution_wh is not None, "SOLVER_NAME.solution_wh is None, did you forget to solve ? (SOLVER_NAME.solve)"
+        self.solution.x.array[:] = self.solution_wh.x.array[:]
+
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
-                          quadrature_degree: int | None = None) -> None:
+                          quadrature_degree: int | None = None) -> Tuple[dict[str, Any], dict[str, Any]]:
         """ Compute the local and global contributions of the residual a posteriori error estimators for the H10 and L2 norms.
 
         Args:
             V0: (optional) dolfinx.fem.FunctionSpace, the function space in which the local contributions of the residual estimators are interpolated.
             quadrature_degree: (optional) int, the quadrature degree used in the integrals of the residual estimator.
+        
+        Returns:
+            h10_residuals: dictionnary containing all the H1 semi-norm residuals.
+            l2_residuals: dictionnary containing all the L2 norm residuals.
         """
         super().print("Compute estimators.")
 
@@ -879,6 +1045,11 @@ class FEMSolver(GenericSolver):
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_H10 = eta_h
 
+        h10_residuals = {"Interior residual":       eta_T,
+                         "Internal edges residual": eta_E,
+                         "Geometry residual":       None,
+                         "Boundary edges residual": None}
+
         """
         L2 estimator
         """
@@ -892,3 +1063,9 @@ class FEMSolver(GenericSolver):
         eta_h = dfx.fem.Function(V0)
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_L2 = eta_h
+
+        l2_residuals = {"Interior residual":       eta_T,
+                        "Internal edges residual": eta_E,
+                        "Geometry residual":       None,
+                        "Boundary edges residual": None}
+        return h10_residuals, l2_residuals

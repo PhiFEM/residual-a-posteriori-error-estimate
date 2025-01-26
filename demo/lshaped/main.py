@@ -5,19 +5,24 @@ from phiFEM.phifem.poisson_dirichlet import poisson_dirichlet_phiFEM, poisson_di
 
 parent_dir = os.path.split(os.path.abspath(__file__))[0]
 
-tilt_angle = np.pi/6. + np.pi/2.
+tilt_angle = np.pi/6.
 shift = np.array([np.pi/32., np.pi/32.])
 
 def rotation(angle, x):
-    # Rotation matrix
-    R = np.array([[ np.cos(angle), np.sin(angle)],
-                  [-np.sin(angle), np.cos(angle)]])
-    rotated = R.dot(np.array(x))
-    return rotated
+    if x.shape[0] == 3:
+        R = np.array([[np.cos(angle), -np.sin(angle), 0],
+                      [np.sin(angle),  np.cos(angle), 0],
+                      [            0,              0, 1]])
+    elif x.shape[0] == 2:
+        R = np.array([[np.cos(angle), -np.sin(angle)],
+                      [np.sin(angle),  np.cos(angle)]])
+    else:
+        raise ValueError("Incompatible argument dimension.")
+    return R.dot(np.asarray(x))
 
 def line(x, y, a, b, c):
-    rotated = rotation(tilt_angle, [x, y])
-    return a*rotated[0] + b*rotated[1] + np.full_like(x, c)
+    rotated = rotation(tilt_angle, np.vstack([x, y]))
+    return a*rotated[0,:] + b*rotated[1,:] + np.full_like(x, c)
 
 def expression_levelset(x):
     x_shift = x[0, :] - np.full_like(x[0, :], shift[0])
@@ -64,18 +69,18 @@ if __name__=="__main__":
                                  expression_levelset,
                                  parent_dir,
                                  expression_rhs=expression_rhs,
-                                 bg_mesh_corners=[np.array([-1., -1.]),
-                                                  np.array([ 1.,  1.])],
+                                 bbox_vertices=np.array([[-1., 1.],
+                                                         [-1., 1.]]),
                                  ref_method=ref_method,
                                  compute_exact_error=compute_exact_errors)
     
     if solver=="FEM":
-        point_1 = rotation(- tilt_angle, np.array([0.,  0.]) * 0.5) + shift
-        point_2 = rotation(- tilt_angle, np.array([0., -1.]) * 0.5) + shift
-        point_3 = rotation(- tilt_angle, np.array([1., -1.]) * 0.5) + shift
-        point_4 = rotation(- tilt_angle, np.array([1.,  1.]) * 0.5) + shift
-        point_5 = rotation(- tilt_angle, np.array([-1., 1.]) * 0.5) + shift
-        point_6 = rotation(- tilt_angle, np.array([-1., 0.]) * 0.5) + shift
+        point_1 = rotation(tilt_angle - np.pi/3., np.array([  0.,   0.]).T) + shift
+        point_2 = rotation(tilt_angle - np.pi/3., np.array([  0., -0.5]).T) + shift
+        point_3 = rotation(tilt_angle - np.pi/3., np.array([ 0.5, -0.5]).T) + shift
+        point_4 = rotation(tilt_angle - np.pi/3., np.array([ 0.5,  0.5]).T) + shift
+        point_5 = rotation(tilt_angle - np.pi/3., np.array([-0.5,  0.5]).T) + shift
+        point_6 = rotation(tilt_angle - np.pi/3., np.array([-0.5,   0.]).T) + shift
 
         geom_vertices = np.vstack([point_1, point_2, point_3, point_4, point_5, point_6]).T
         poisson_dirichlet_FEM(cl,

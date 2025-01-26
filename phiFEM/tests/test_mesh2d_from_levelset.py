@@ -12,26 +12,31 @@ def expression_1(x):
     return np.abs(x[0, :]) + np.abs(x[1, :]) - np.ones_like(x[0, :])
 geom_vertices_1 = np.array([[1., 0., -1., 0.],
                             [0., 1., 0., -1.]])
-bbox_1 = np.array([[-1.1, -1.1],
-                   [ 1.1,  1.1]])
+bbox_1 = np.array([[-1.1, 1.1],
+                   [-1.1, 1.1]])
 
 # Unit circle
 def expression_2(x):
     return x[0, :]**2 + x[1, :]**2 - np.ones_like(x[0, :])
-bbox_2 = np.array([[-1.1, -1.1],
-                   [ 1.1,  1.1]])
+bbox_2 = np.array([[-1.1, 1.1],
+                   [-1.1, 1.1]])
 
 tilt_angle = np.pi/6. + np.pi/2.
 
 def rotation(angle, x):
-    # Rotation matrix
-    R = np.array([[ np.cos(angle), np.sin(angle)],
-                    [-np.sin(angle), np.cos(angle)]])
-    rotated = R.dot(x)
-    return rotated
+    if x.shape[0] == 3:
+        R = np.array([[np.cos(angle), -np.sin(angle), 0],
+                      [np.sin(angle),  np.cos(angle), 0],
+                      [             0,               0, 1]])
+    elif x.shape[0] == 2:
+        R = np.array([[np.cos(angle), -np.sin(angle)],
+                      [np.sin(angle),  np.cos(angle)]])
+    else:
+        raise ValueError("Incompatible argument dimension.")
+    return R.dot(np.asarray(x))
 
 def line(x, a, b, c):
-    rotated = rotation(tilt_angle, x)
+    rotated = rotation(-tilt_angle, x)
     return a*rotated[0] + b*rotated[1] + np.full_like(x[0, :], c)
 
 def expression_3(x):
@@ -52,11 +57,11 @@ def expression_3(x):
 
 geom_vertices_3_noshift = np.array([[0., 0.5, 0.5, -0.5, -0.5,   0.],
                                     [0.,  0., 0.5,  0.5, -0.5, -0.5]])
-geom_vertices_3_rot = rotation(-np.pi/6., geom_vertices_3_noshift)
+geom_vertices_3_rot = rotation(np.pi/6., geom_vertices_3_noshift)
 geom_vertices_3 = geom_vertices_3_rot + np.pi/32.
 
-bbox_3 = np.array([[-0.9, -0.7],
-                   [ 0.3,  0.8]])
+bbox_3 = np.array([[-0.9, 0.3],
+                   [-0.7, 0.8]])
 
 data_1  = ("|x|+|y|-1",
            expression_1,
@@ -116,4 +121,4 @@ def test_mesh2d_from_levelset(lc, data):
     assert np.less(err_max_to_boundary/lc, 0.5), f"Error data {data_name}. Maximum relative error to the boundary: {err_max_to_boundary/lc}"
 
 if __name__=="__main__":
-    test_mesh2d_from_levelset(0.1, data_1)
+    test_mesh2d_from_levelset(0.1, data_3)

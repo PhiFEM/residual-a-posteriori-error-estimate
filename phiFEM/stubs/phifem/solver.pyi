@@ -1,28 +1,16 @@
-from   basix.ufl import element, _ElementBase
+from   basix.ufl import _ElementBase
 from   collections.abc import Callable
-import dolfinx as dfx
-from   dolfinx.mesh import Mesh, MeshTags
-from   dolfinx.fem.petsc import assemble_matrix, assemble_vector
-from   dolfinx.fem import Form, Function, FunctionSpace, DirichletBC
-from   dolfinx.io import XDMFFile
-from   mpi4py import MPI
+from   dolfinx.mesh import Mesh
+from   dolfinx.fem import Function, FunctionSpace, DirichletBC
 import numpy as np
 import numpy.typing as npt
-import os
 from   os import PathLike
-from   petsc4py.PETSc import Options, KSP
-from petsc4py.PETSc import Mat as PETSc_Mat
-from petsc4py.PETSc import Vec as PETSc_Vec
+from   petsc4py.PETSc import KSP # type: ignore[attr-defined]
 from   typing import Any, Tuple
-import ufl
-from   ufl import inner, jump, grad, div, avg
-from   ufl.classes import Measure
+from   ufl.classes import Measure # type: ignore
 
-from phiFEM.phifem.compute_meshtags import tag_entities
-from phiFEM.phifem.continuous_functions import ContinuousFunction, ExactSolution, Levelset
-from phiFEM.phifem.mesh_scripts import compute_outward_normal
+from phiFEM.phifem.continuous_functions import ContinuousFunction, Levelset
 from phiFEM.phifem.saver import ResultsSaver
-
 
 NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
 

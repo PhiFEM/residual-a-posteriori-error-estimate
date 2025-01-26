@@ -5,7 +5,7 @@ import pytest
 from phiFEM.phifem.compute_meshtags import tag_entities
 from phiFEM.phifem.continuous_functions import Levelset
 import os
-from test_outward_normal import create_disk
+from test_outward_normal import create_disk # type: ignore
 
 
 """
@@ -79,7 +79,7 @@ if __name__=="__main__":
     with XDMFFile(MPI.COMM_WORLD, os.path.join(parent_dir, "tests_data", "disk.xdmf"), "r") as fi:
         mesh = fi.read_mesh()
     
-    levelset = Levelset(lambda x: x[:, 0]**2 + x[:, 1]**2 - 0.125)
+    levelset = Levelset(lambda x: x[0, :]**2 + x[1, :]**2 - 0.125)
 
     cells_tags = tag_entities(mesh,
                               levelset,
