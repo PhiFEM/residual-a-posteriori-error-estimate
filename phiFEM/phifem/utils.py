@@ -1,16 +1,23 @@
+from basix.ufl import element
+from   collections.abc import Callable
 from   copy import deepcopy
+import dolfinx as dfx
+from   dolfinx.mesh import Mesh
 import functools
 import inspect
 import numpy as np
 import os
+from   typing import Any
 
-debug = os.getenv("DEBUG")
-if debug=="True":
+from   phiFEM.phifem.saver import ResultsSaver
+
+debug_env = os.getenv("DEBUG")
+if debug_env=="True":
     debug = True
 else:
     debug = False
 
-def immutable(*arg_names: str) -> None:
+def immutable(*arg_names: str) -> Callable:
     """ Decorator that check if the arguments specified have been modified (only if the DEBUG environment variable is set to True).
 
     Args:
@@ -43,3 +50,30 @@ def immutable(*arg_names: str) -> None:
             return result
         return decorated
     return decorator_mutable
+
+def assemble_and_save_residual(mesh: Mesh,
+                               saver: ResultsSaver,
+                               eta: Any | None,
+                               name: str,
+                               iteration: int) -> None:
+    """ Assemble and save a residual (linear form) as a DG0 function.
+
+    Args:
+        mesh: the mesh supporting the DG0 space.
+        saver: the saver object.
+        eta: the unassembled residual.
+        name: the name of the residual.
+        iteration: the refinement iteration number.
+    """
+    if eta is not None:
+        DG0Element = element("DG", mesh.topology.cell_name(), 0)
+        V0 = dfx.fem.functionspace(mesh, DG0Element)
+
+        eta_form = dfx.fem.form(eta)
+        eta_vec = dfx.fem.petsc.assemble_vector(eta_form)
+        eta_global = np.sqrt(sum(eta_vec.array[:]))
+        eta_h = dfx.fem.Function(V0)
+        eta_h.vector.setArray(eta_vec.array[:])
+
+        saver.save_function(eta_h, name + "_" + str(iteration).zfill(2))
+        saver.add_new_value(name, eta_global)
