@@ -1,8 +1,10 @@
+from basix.ufl import element
+import dolfinx as dfx
 from dolfinx.io import XDMFFile
 from mpi4py import MPI
 import numpy as np
 import pytest
-from phiFEM.phifem.compute_meshtags import tag_entities
+from phiFEM.phifem.compute_meshtags import tag_cells, tag_facets
 from phiFEM.phifem.continuous_functions import Levelset
 import os
 from test_outward_normal import create_disk # type: ignore
@@ -28,15 +30,18 @@ def test_compute_meshtags(data_name, mesh_name, levelset, cells_benchmark_name, 
     with XDMFFile(MPI.COMM_WORLD, os.path.join(parent_dir, "tests_data", "disk.xdmf"), "r") as fi:
         mesh = fi.read_mesh()
     
+    levelset_element = element("Lagrange", mesh.topology.cell_name(), 1)
+    V = dfx.fem.functionspace(mesh, levelset_element)
+    discrete_levelset = dfx.fem.Function(V)
+    discrete_levelset.interpolate(levelset.expression)
+    
     # Test computation of cells tags
-    cells_tags = tag_entities(mesh,
-                              levelset,
-                              2)
+    cells_tags = tag_cells(mesh,
+                           discrete_levelset)
     # Test computation of facets tags when cells tags are provided
-    facets_tags = tag_entities(mesh,
-                               levelset,
-                               1,
-                               cells_tags=cells_tags)
+    facets_tags = tag_facets(mesh,
+                             discrete_levelset,
+                             cells_tags)
 
     # To save benchmark
     if save_as_benchmark:
@@ -61,13 +66,6 @@ def test_compute_meshtags(data_name, mesh_name, levelset, cells_benchmark_name, 
     assert np.all(facets_tags.indices == facets_benchmark[0,:])
     assert np.all(facets_tags.values  == facets_benchmark[1,:])
 
-    # Test computation of facets tags when cells tags are not provided
-    facets_tags = tag_entities(mesh,
-                               levelset,
-                               1)
-
-    assert np.all(facets_tags.indices == facets_benchmark[0,:])
-    assert np.all(facets_tags.values  == facets_benchmark[1,:])
 
 if __name__=="__main__":
     mesh_path = os.path.join(parent_dir, "tests_data", "disk" + ".xdmf")
@@ -76,20 +74,45 @@ if __name__=="__main__":
         print(f"{mesh_path} not found, we create it.")
         create_disk(mesh_path, 0.1)
     
-    with XDMFFile(MPI.COMM_WORLD, os.path.join(parent_dir, "tests_data", "disk.xdmf"), "r") as fi:
+    with XDMFFile(MPI.COMM_WORLD, mesh_path, "r") as fi:
         mesh = fi.read_mesh()
     
-    levelset = Levelset(lambda x: x[0, :]**2 + x[1, :]**2 - 0.125)
+    tilt_angle = np.pi/3.
+    def rotation(angle, x):
+        if x.shape[0] == 3:
+            R = np.array([[np.cos(angle), -np.sin(angle), 0],
+                          [np.sin(angle),  np.cos(angle), 0],
+                          [             0,               0, 1]])
+        elif x.shape[0] == 2:
+            R = np.array([[np.cos(angle), -np.sin(angle)],
+                          [np.sin(angle),  np.cos(angle)]])
+        else:
+            raise ValueError("Incompatible argument dimension.")
+        return R.dot(np.asarray(x))
 
-    cells_tags = tag_entities(mesh,
-                              levelset,
-                              2,
-                              plot=True)
+    # def expression_levelset(x):
+    #     def fct(x):
+    #         return np.sum(np.abs(rotation(-tilt_angle + np.pi/4., x)), axis=0)
+    #     return fct(x) - np.sqrt(2.)/2.
+    
+    def expression_levelset(x):
+        return x[0, :]**2 + x[1, :]**2 - 0.125
 
-    facets_tags = tag_entities(mesh,
-                               levelset,
-                               1,
-                               cells_tags=cells_tags,
-                               plot=True)
+    levelset = Levelset(expression_levelset)
 
-    test_compute_meshtags("0", "disk", levelset, "celltags_1", "facettags_1", save_as_benchmark=True)
+    k = 2
+    CGElement = element("Lagrange", mesh.topology.cell_name(), k)
+    V = dfx.fem.functionspace(mesh, CGElement)
+    discrete_levelset = dfx.fem.Function(V)
+    discrete_levelset.interpolate(levelset.expression)
+
+    cells_tags = tag_cells(mesh,
+                           discrete_levelset,
+                           plot=False)
+
+    facets_tags = tag_facets(mesh,
+                             discrete_levelset,
+                             cells_tags,
+                             plot=True)
+
+    test_compute_meshtags("0", "disk", levelset, "celltags_1", "facettags_1", save_as_benchmark=False)

@@ -1,171 +1,196 @@
+from   basix.ufl import element
 import dolfinx as dfx
-from dolfinx.mesh import Mesh, MeshTags
-from dolfinx import cpp
+from   dolfinx.fem import Function
+from   dolfinx.fem.petsc import assemble_vector
+from   dolfinx.mesh import Mesh, MeshTags
 import matplotlib.pyplot as plt
 import numpy as np
-import numpy.typing as npt 
+import numpy.typing as npt
+import ufl # type: ignore[import-untyped]
+from   ufl import inner
+
 from phiFEM.phifem.mesh_scripts import plot_mesh_tags
-from phiFEM.phifem.continuous_functions import Levelset
-from typing import Any, Tuple
 
-# TODO: Modify to use in parallel
-
-def _select_entities(mesh: Mesh,
-                     levelset: Levelset,
-                     edim: int,
-                     padding: bool =False) -> Tuple[npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32], npt.NDArray[np.int32]]:
-    """ Compute the list of entities strictly inside Omega_h and the list of entities having a non-empty intersection with Gamma_h.
-
-    Args:
-        mesh: the background mesh.
-        levelset: a Levelset object
-        edim: the dimension of the entities.
-        padding: (optional) bool, select padding entities to increase the chances of the submesh to contain the exact boundary.
-    
-    Returns:
-        Two lists of entities indices.
-    """
-    mesh.topology.create_connectivity(edim, edim)
-    # List all entities of the mesh
-    entities: npt.NDArray[np.int32] = np.arange(mesh.topology.index_map(edim).size_global, dtype = np.int32) # TODO: change this line to allow parallel computing
-
-    # List entities that are stricly included in Omega_h
-    list_interior_entities: npt.NDArray[Any] = dfx.mesh.locate_entities(mesh,
-                                                                        edim,
-                                                                        levelset.interior(0.))
-
-    # List entities that are strictly excluded from Omega_h
-    exterior_entities: npt.NDArray[Any] = dfx.mesh.locate_entities(mesh,
-                                                                   edim,
-                                                                   levelset.exterior(0.))
-
-    # List entities having a non-empty intersection with Omega_h
-    interior_entities: npt.NDArray[Any] = np.setdiff1d(entities, exterior_entities)
-    # Cells case
-    # List entities having a non-empty intersection with Gamma_h
-    cut_entities: npt.NDArray[Any] = np.setdiff1d(interior_entities, list_interior_entities)
-
-    padding_entities: npt.NDArray[Any] = np.asarray([])
-    if padding:
-        hmax_cutcells: float = max(cpp.mesh.h(mesh._cpp_object, edim, cut_entities))
-        list_exterior_padding_entities = dfx.mesh.locate_entities(mesh,
-                                                                  edim,
-                                                                  levelset.exterior(0., padding=hmax_cutcells))
-        padding_interior_entities = np.setdiff1d(entities, list_exterior_padding_entities)
-        padding_entities = np.setdiff1d(padding_interior_entities, np.union1d(interior_entities, cut_entities))
-        exterior_entities = np.setdiff1d(exterior_entities, padding_entities)
-    
-    return list_interior_entities, cut_entities, exterior_entities, padding_entities
-
-def tag_entities(mesh: Mesh,
-                 levelset: Levelset,
-                 edim: int,
-                 cells_tags: MeshTags | None = None,
-                 padding: bool = False,
-                 plot: bool = False) -> MeshTags:
-    """ Compute the entity tags for the interior (Omega_h) and the cut (set of cells having a non empty intersection with Gamma_h).
-    Tag = 1: interior strict (Omega_h \ Omega_Gamma_h)
-    Tag = 2: cut (Omega_Gamma_h)
-    Tag = 3: exterior (entities strictly outside Omega_h)
-    Tag = 4: facets: Gamma_h
-             cells: padding cells.
+def tag_cells(mesh: Mesh,
+              discrete_levelset: Function,
+              padding: bool = False,
+              plot: bool = False) -> MeshTags:
+    """Tag the mesh cells by computing detection = Σ f(dof)/Σ|f(dof)| for each cell.
+         detection == 1  => the cell is stricly OUTSIDE {phi_h < 0} => we tag it as 3
+         detection == -1 => the cell is stricly INSIDE  {phi_h < 0} => we tag it as 1
+         otherwise       => the cell is CUT by Gamma_h              => we tag is as 2
 
     Args:
         mesh: the background mesh.
-        levelset: a Levelset object.
-        edim: dimension of the entities.
-        cells_tags: the cells tags.
-
+        discrete_levelset: the discretization of the levelset.
+        padding: unused for the moment, TODO: implement the possiblity to add a padding.
+        plot: if True plots the mesh with tags (can drastically slow the computation!).
+    
     Returns:
-        A meshtags object.
+        The cells tags as a MeshTags object.
     """
-
-    # If cells_tags is not provided, we need to go through cells selection.
-    cdim: int = mesh.topology.dim
-    if cells_tags is None:
-        if padding:
-            interior_entities, cut_fronteer_entities, exterior_entities, padding_entities = _select_entities(mesh, levelset, cdim, padding=padding)
-        else:
-            interior_entities, cut_fronteer_entities, exterior_entities, _ = _select_entities(mesh, levelset, cdim, padding=padding)
+    # Create the custom quadrature rule.
+    # The evaluation points are the dofs of the reference cell.
+    # The weights are 1.
+    quadrature_points: npt.NDArray[np.float64]
+    levelset_degree = discrete_levelset.function_space.ufl_element().degree
+    if mesh.topology.cell_name() == "triangle":
+        xs = np.linspace(0., 1., levelset_degree + 1)
+        xx, yy = np.meshgrid(xs, xs)
+        x_coords = xx.reshape((1, xx.shape[0] * xx.shape[1]))
+        y_coords = xx.reshape((1, yy.shape[0] * yy.shape[1]))
+        points = np.vstack([x_coords, y_coords])
+        quadrature_points = points[:,points[1,:] <= np.ones_like(points[0,:])-points[0,:]]
+    elif mesh.topology.cell_name() == "tetrahedron":
+        xs = np.linspace(0., 1., levelset_degree + 1)
+        xx, yy, zz = np.meshgrid(xs, xs, xs)
+        x_coords = xx.reshape((1, xx.shape[0] * xx.shape[1]))
+        y_coords = xx.reshape((1, yy.shape[0] * yy.shape[1]))
+        z_coords = xx.reshape((1, zz.shape[0] * zz.shape[1]))
+        points = np.vstack([x_coords, y_coords, z_coords])
+        quadrature_points = points[:,points[2,:] <= np.ones_like(points[0,:])-points[0,:]-points[1,:]]
     else:
-        interior_entities     = cells_tags.find(1)
-        cut_fronteer_entities = cells_tags.find(2)
-        exterior_entities     = cells_tags.find(3)
-        padding_entities      = cells_tags.find(4)
+        raise NotImplementedError("Mesh cell type not supported. Only supported types are: triangle, tetrahedron.")
     
-    lists: list[npt.NDArray[np.int32] | list[int]]
-    if edim == mesh.topology.dim - 1:
-        # Get the indices of facets belonging to cells in interior_entities and cut_fronteer_entities
-        mesh.topology.create_connectivity(cdim, edim)
-        c2f_connect = mesh.topology.connectivity(cdim, edim)
-        num_facets_per_cell = len(c2f_connect.links(0))
-        # Note: here the reshape does not need any special treatment since all cells have the same number of facets.
-        c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
-        interior_boundary_facets = np.intersect1d(c2f_map[interior_entities],
-                                                  c2f_map[cut_fronteer_entities])
+    quadrature_weights = np.ones_like(quadrature_points[0,:])
+    custom_rule = {"quadrature_rule":    "custom",
+                   "quadrature_points":  quadrature_points.T,
+                   "quadrature_weights": quadrature_weights}
+    
+    cells_detection_dx = ufl.Measure("dx",
+                                     domain=mesh,
+                                     metadata=custom_rule)
+    
+    # We localize at each cell via a DG0 test function.
+    DG0Element = element("DG", mesh.topology.cell_name(), 0)
+    V0 = dfx.fem.functionspace(mesh, DG0Element)
+    v0 = ufl.TestFunction(V0)
 
-        if padding:
-            boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
-                                             np.union1d(c2f_map[exterior_entities], c2f_map[padding_entities]))
-        else:
-            boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], 
-                                             c2f_map[exterior_entities])
+    # Assemble the numerator of detection
+    cells_detection_num = inner(discrete_levelset, v0) * cells_detection_dx
+    cells_detection_num_form = dfx.fem.form(cells_detection_num)
+    cells_detection_num_vec = assemble_vector(cells_detection_num_form)
+    # Assemble the denominator of detection
+    cells_detection_denom = inner(ufl.algebra.Abs(discrete_levelset), v0) * cells_detection_dx
+    cells_detection_denom_form = dfx.fem.form(cells_detection_denom)
+    cells_detection_denom_vec = assemble_vector(cells_detection_denom_form)
 
-        interior_fronteer_facets, cut_facets, exterior_facets, _ = _select_entities(mesh, levelset, edim)
-        interior_facets = np.setdiff1d(interior_fronteer_facets, interior_boundary_facets)
-        cut_facets = np.union1d(cut_facets, interior_boundary_facets)
-        exterior_facets = np.setdiff1d(exterior_facets, boundary_facets)
-        
-        # Add the boundary facets to the proper lists of facets (shouldn't be necessary since the intersection of Gamma_h with the boundary of the box should be empty)
-        background_boundary_facets = dfx.mesh.locate_entities_boundary(mesh,
-                                                                       edim,
-                                                                       lambda x: np.ones_like(x[1]).astype(bool))
-        intersect_exterior_boundary_facets = np.intersect1d(c2f_map[cut_fronteer_entities], background_boundary_facets)
-        exterior_facets = np.setdiff1d(exterior_facets, intersect_exterior_boundary_facets)
-        boundary_facets = np.union1d(boundary_facets, intersect_exterior_boundary_facets)
+    # cells_detection_denom_vec is not supposed to be zero, this would mean that the levelset is zero at all dofs in a cell, which is not allowed.
+    if np.any(np.isclose(cells_detection_denom_vec, 0.)):
+        raise ValueError("The discrete levelset vanishes on at least one entire mesh cell.")
 
-        lists = [interior_facets,
-                 cut_facets,
-                 exterior_facets,
-                 boundary_facets]
+    cells_detection_vec = cells_detection_num_vec/cells_detection_denom_vec
+    exterior_indices = np.where(cells_detection_vec.array == 1.)
+    interior_indices = np.where(cells_detection_vec.array == -1.)
+    cut_indices      = np.where(np.logical_and(cells_detection_vec.array != -1., 
+                                               cells_detection_vec.array != 1.))
+    
+    if len(interior_indices) == 0:
+        raise ValueError("No interior cells (1)!")
+    if len(cut_indices) == 0:
+        raise ValueError("No cut cells (2)!")
 
-        assert len(interior_facets) > 0, "No interior facets (1) tagged!"
-        assert len(cut_facets)      > 0, "No cut facets (2) tagged!"
-        assert len(boundary_facets) > 0, "No boundary facets (4) tagged!"
-    elif edim == mesh.topology.dim:
-        if padding:
-            lists = [interior_entities,
-                     cut_fronteer_entities,
-                     exterior_entities,
-                     padding_entities]
-        else:
-            lists = [interior_entities,
-                     cut_fronteer_entities,
-                     exterior_entities]
+    # Create the meshtags from the indices.
+    indices = np.hstack([exterior_indices,
+                         interior_indices,
+                         cut_indices]).astype(np.int32)[0]
+    exterior_marker = np.full_like(exterior_indices, 3).astype(np.int32)
+    interior_marker = np.full_like(interior_indices, 1).astype(np.int32)
+    cut_marker      = np.full_like(cut_indices,      2).astype(np.int32)
+    markers = np.hstack([exterior_marker,
+                         interior_marker,
+                         cut_marker]).astype(np.int32)[0]
+    sorted_indices = np.argsort(indices)
 
+    cells_tags = dfx.mesh.meshtags(mesh,
+                                   mesh.topology.dim,
+                                   indices[sorted_indices],
+                                   markers[sorted_indices])
 
-        assert len(interior_entities)     > 0, "No interior cells (1) tagged!"
-        assert len(cut_fronteer_entities) > 0, "No cut cells (2) tagged!"
-        if padding:
-            assert len(padding_entities)  > 0, "No padding cells (4) tagged!"
+    if plot:
+        figure, ax = plt.subplots()
+        plot_mesh_tags(mesh, cells_tags, ax=ax, display_indices=False)
+        plt.savefig("./cells_tags.svg", format="svg", dpi=2400, bbox_inches="tight")
+    
+    return cells_tags
 
-    list_markers = [np.full_like(l, i+1) for i, l in enumerate(lists)]
-    entities_indices = np.hstack(lists).astype(np.int32)
-    entities_markers = np.hstack(list_markers).astype(np.int32)
+def tag_facets(mesh: Mesh,
+               discrete_levelset: Function,
+               cells_tags: MeshTags,
+               plot: bool = False) -> MeshTags:
+    """Tag the mesh facets.
 
-    sorted_indices = np.argsort(entities_indices)
- 
-    entities_tags = dfx.mesh.meshtags(mesh,
-                                      edim,
-                                      entities_indices[sorted_indices],
-                                      entities_markers[sorted_indices])
+    Args:
+        mesh: the background mesh.
+        discrete_levelset: the discretization of the levelset.
+        cells_tags: the MeshTags object containing cells tags.
+        plot: if True plots the mesh with tags (can drastically slow the computation!).
+    
+    Returns:
+        The facets tags as a MeshTags object.
+    """
+    cdim = mesh.topology.dim
+    fdim = cdim - 1
+    # Create the cell to facet connectivity and reshape it into an array s.t. c2f_map[cell_index] = [facets of this cell index]
+    mesh.topology.create_connectivity(cdim, fdim)
+    c2f_connect = mesh.topology.connectivity(cdim, fdim)
+    num_facets_per_cell = len(c2f_connect.links(0))
+    c2f_map = np.reshape(c2f_connect.array, (-1, num_facets_per_cell))
+
+    # Get tagged cells
+    interior_cells = cells_tags.find(1)
+    cut_cells      = cells_tags.find(2)
+    exterior_cells = cells_tags.find(3)
+    
+    # Facets shared by an interior cell and a cut cell
+    interior_boundary_facets = np.intersect1d(c2f_map[interior_cells],
+                                              c2f_map[cut_cells])
+    # Facets shared by an exterior cell and a cut cell
+    exterior_boundary_facets = np.intersect1d(c2f_map[exterior_cells],
+                                              c2f_map[cut_cells])
+    # Boundary facets ∂Ω_h
+    boundary_facets = np.intersect1d(c2f_map[cut_cells], 
+                                     dfx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.ones_like(x[1]).astype(bool)))
+    # Cut facets F_h^Γ
+    cut_facets = np.setdiff1d(c2f_map[cut_cells],
+                              np.union1d(exterior_boundary_facets, boundary_facets))
+
+    # Interior facets 
+    interior_facets = np.setdiff1d(c2f_map[interior_cells],
+                                   interior_boundary_facets)
+    # Exterior facets 
+    exterior_facets = np.setdiff1d(c2f_map[exterior_cells],
+                                   exterior_boundary_facets)
+    
+    # if len(interior_facets) == 0:
+    #     raise ValueError("No interior facets (1)!")
+    # if len(cut_facets) == 0:
+    #     raise ValueError("No cut facets (2)!")
+    # if len(boundary_facets) == 0:
+    #     raise ValueError("No boundary facets (4)!")
+    
+    # Create the meshtags from the indices.
+    indices = np.hstack([exterior_facets,
+                         interior_facets,
+                         cut_facets,
+                         boundary_facets]).astype(np.int32)
+    interior_marker = np.full_like(interior_facets, 1).astype(np.int32)
+    cut_marker      = np.full_like(cut_facets,      2).astype(np.int32)
+    exterior_marker = np.full_like(exterior_facets, 3).astype(np.int32)
+    boundary_marker = np.full_like(boundary_facets, 4).astype(np.int32)
+    markers = np.hstack([exterior_marker,
+                         interior_marker,
+                         cut_marker,
+                         boundary_marker]).astype(np.int32)
+    sorted_indices = np.argsort(indices)
+
+    facets_tags = dfx.mesh.meshtags(mesh,
+                                    fdim,
+                                    indices[sorted_indices],
+                                    markers[sorted_indices])
     
     if plot:
         figure, ax = plt.subplots()
-        plot_mesh_tags(mesh, entities_tags, ax=ax, display_indices=False, expression_levelset=levelset.expression)
-        if edim == mesh.topology.dim:
-            ename = "cells"
-        else:
-            ename = "facets"
-        plt.savefig(f"./{ename}_tags.svg", format="svg", dpi=2400, bbox_inches="tight")
-    return entities_tags
+        plot_mesh_tags(mesh, facets_tags, ax=ax, display_indices=False)
+        plt.savefig("./facets_tags.svg", format="svg", dpi=2400, bbox_inches="tight")
+    return facets_tags

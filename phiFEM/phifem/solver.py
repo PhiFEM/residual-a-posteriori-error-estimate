@@ -19,7 +19,7 @@ import ufl # type: ignore[import-untyped]
 from   ufl import inner, jump, grad, div, avg
 from   ufl.classes import Measure # type: ignore[import-untyped]
 
-from phiFEM.phifem.compute_meshtags import tag_entities
+from phiFEM.phifem.compute_meshtags import tag_cells, tag_facets
 from phiFEM.phifem.continuous_functions import ContinuousFunction, ExactSolution, Levelset
 from phiFEM.phifem.mesh_scripts import compute_outward_normal
 from phiFEM.phifem.saver import ResultsSaver
@@ -245,7 +245,7 @@ class GenericSolver:
 
         DG0Element = element("DG", reference_mesh.topology.cell_name(), 0)
         V0 = dfx.fem.functionspace(reference_mesh, DG0Element)
-        w0 = ufl.TrialFunction(V0)
+        w0 = ufl.TestFunction(V0)
 
         L2_norm_local = inner(inner(e_ref, e_ref), w0) * dx2
         H10_norm_local = inner(inner(grad(e_ref), grad(e_ref)), w0) * dx2
@@ -518,11 +518,12 @@ class PhiFEMSolver(GenericSolver):
         if self.levelset is None:
             raise ValueError("SOLVER_NAME.levelset is None, did you forget to set the levelset ? (SOLVER_NAME.set_levelset)")
 
-        self.bg_mesh_cells_tags = tag_entities(self.mesh,
-                                               self.levelset,
-                                               self.mesh.topology.dim,
-                                               padding=padding,
-                                               plot=plot)
+        bg_levelset_space = dfx.fem.functionspace(self.mesh, self.levelset_element)
+        bg_discrete_levelset = self.levelset.interpolate(bg_levelset_space)
+
+        self.bg_mesh_cells_tags = tag_cells(self.mesh,
+                                            bg_discrete_levelset,
+                                            plot=plot)
         working_cells_tags = self.bg_mesh_cells_tags
 
         # Create the submesh and transfer the cells tags from the bg mesh to the submesh.
@@ -545,12 +546,13 @@ class PhiFEMSolver(GenericSolver):
         working_cells_tags = self.submesh_cells_tags
         working_mesh = self.submesh
 
-        self.facets_tags = tag_entities(working_mesh,
-                                        self.levelset,
-                                        working_mesh.topology.dim - 1,
-                                        cells_tags=working_cells_tags,
-                                        padding=padding,
-                                        plot=plot)
+        submesh_levelset_space = dfx.fem.functionspace(working_mesh, self.levelset_element)
+        submesh_discrete_levelset = self.levelset.interpolate(submesh_levelset_space)
+
+        self.facets_tags = tag_facets(working_mesh,
+                                      submesh_discrete_levelset,
+                                      working_cells_tags,
+                                      plot=plot)
     
     def set_variational_formulation(self,
                                     sigma: float = 1.,
@@ -751,7 +753,7 @@ class PhiFEMSolver(GenericSolver):
             h10_residuals: dictionnary containing all the H1 semi-norm residuals.
             l2_residuals: dictionnary containing all the L2 norm residuals.
         """
-        self.print("Solve linear system.")
+        self.print("Estimate residual.")
 
         if self.solution is None:
             raise ValueError("SOLVER_NAME.solution is None, did you forget to solver ? (SOLVER_NAME.solve)")

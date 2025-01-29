@@ -1,3 +1,4 @@
+from basix.ufl import element
 import dolfinx as dfx
 from dolfinx.io import XDMFFile
 from lxml import etree
@@ -8,7 +9,7 @@ import pygmsh as pg # type: ignore
 import pytest
 import os
 
-from phiFEM.phifem.compute_meshtags import tag_entities
+from phiFEM.phifem.compute_meshtags import tag_cells, tag_facets
 from phiFEM.phifem.continuous_functions import Levelset
 from phiFEM.phifem.mesh_scripts import (reshape_facets_map,
                                         compute_outward_normal)
@@ -94,8 +95,11 @@ def test_outward_normal(data_name, mesh_name, levelset, save_normal=False):
     cdim = mesh.topology.dim
     fdim = mesh.topology.dim - 1
 
-    cells_tags  = tag_entities(mesh, levelset, cdim, plot=False)
-    facets_tags = tag_entities(mesh, levelset, fdim, cells_tags=cells_tags, plot=False)
+    levelset_element = element("Lagrange", mesh.topology.cell_name(), 1)
+    levelset_space = dfx.fem.functionspace(mesh, levelset_element)
+    discrete_levelset = levelset.interpolate(levelset_space)
+    cells_tags  = tag_cells(mesh, discrete_levelset)
+    facets_tags = tag_facets(mesh, discrete_levelset, cells_tags)
     w0 = compute_outward_normal(mesh, levelset)
 
     if save_normal:

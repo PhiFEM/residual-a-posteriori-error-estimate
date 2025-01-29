@@ -23,8 +23,7 @@ class ContinuousFunction:
 
         # Updates the signature of __call__ to match expression's signature
         functools.update_wrapper(self, expression)
-    
-    # TODO: improve __call__ method to tackle both single vectorial argument AND single/multiple scalar arguments
+
     @immutable("x")
     def __call__(self, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """ Call the continuous function for computation.
@@ -46,7 +45,6 @@ class ContinuousFunction:
 
         return self.expression(x)
 
-    
     def interpolate(self, FE_space: FunctionSpace) -> Function:
         """ Interpolate the function onto a finite element space.
         A dict is created in order to remember previous interpolations and save computational time.

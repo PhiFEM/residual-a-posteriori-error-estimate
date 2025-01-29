@@ -1,15 +1,11 @@
 from dolfinx.mesh import Mesh, MeshTags
-import numpy.typing as npt 
-from phiFEM.phifem.continuous_functions import Levelset
-from typing import Any, Tuple
+from dolfinx.fem import Function
 
-# TODO: Modify to use in parallel
-
-def _select_entities(mesh: Mesh, levelset: Levelset, edim: int, padding: bool =False) -> Tuple[npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any] | list[int]]: ...
-
-def tag_entities(mesh: Mesh,
-                 levelset: Levelset,
-                 edim: int,
-                 cells_tags: MeshTags | None = None,
-                 padding: bool =False,
-                 plot: bool =False) -> MeshTags: ...
+def tag_cells(mesh: Mesh,
+              discrete_levelset: Function,
+              plot: bool =False) -> MeshTags: ...
+        
+def tag_facets(mesh: Mesh,
+               discrete_levelset: Function,
+               cells_tags: MeshTags,
+               plot: bool =False) -> MeshTags: ...

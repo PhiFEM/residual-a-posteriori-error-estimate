@@ -6,7 +6,7 @@ from   dolfinx.cpp.graph import AdjacencyList_int32 # type: ignore
 from   dolfinx.mesh import Mesh, MeshTags
 from   dolfinx.fem import Function
 from   mpl_toolkits.axes_grid1 import make_axes_locatable # type: ignore
-from matplotlib import cm
+from   matplotlib import cm
 import matplotlib.collections as mpl_collections
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
@@ -205,7 +205,7 @@ def plot_mesh_tags(
     points = mesh.geometry.x
 
     # Get unique tags and create a custom colormap
-    tab10 = mcolors.Colormap("tab10")
+    tab10 = cm.get_cmap("tab10")
     colors = [tab10(i / 10.) for i in range(10)]
     colors = colors[:5]
     cmap = mcolors.ListedColormap(colors) # type: ignore
@@ -290,7 +290,7 @@ def plot_mesh_tags(
                     4: "Gamma_h"}
     divider = make_axes_locatable(ax)
     cax = divider.append_axes("right", size="5%", pad=0.05)
-    colorbar = plt.colorbar(mappable, cax=cax, boundaries=np.arange(6) - 0.5, ticks=np.arange(6))
+    colorbar = plt.colorbar(mappable, cax=cax, boundaries=np.arange(5) - 0.5, ticks=np.arange(5))
     
     # Set colorbar labels
     colorbar.set_ticklabels([f"{tag_dict[key]} ({key})" for key in tag_dict.keys()])
@@ -306,7 +306,8 @@ def plot_mesh_tags(
         xx, yy = np.meshgrid(xs, ys)
         xx_rs = xx.reshape(xx.shape[0] * xx.shape[1])
         yy_rs = yy.reshape(yy.shape[0] * yy.shape[1])
-        zz_rs = expression_levelset(xx_rs, yy_rs)
+        points = np.vstack([xx_rs, yy_rs])
+        zz_rs = expression_levelset(points)
         zz = zz_rs.reshape(xx.shape)
 
         ax.contour(xx, yy, zz, [0.], linewidths=0.5)
