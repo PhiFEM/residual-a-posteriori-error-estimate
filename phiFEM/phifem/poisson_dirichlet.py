@@ -106,12 +106,13 @@ def poisson_dirichlet_phiFEM(cl: float,
                                      petsc_solver,
                                      levelset_element=CG1Element,
                                      use_fine_space=True,
+                                     box_mode=True,
                                      num_step=i,
                                      ref_strat=ref_method,
                                      save_output=save_output)
         phiFEM_solver.set_source_term(rhs)
         phiFEM_solver.set_levelset(phi)
-        phiFEM_solver.compute_tags(detection_element=detectionElement, padding=False, plot=False)
+        phiFEM_solver.compute_tags(detection_element=detectionElement, plot=False)
         v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
         results_saver.add_new_value("dofs", num_dofs)
         phiFEM_solver.assemble()

@@ -36,6 +36,7 @@ class GenericSolver:
                  PETSc_solver: PETSc_KSP,
                  ref_strat: str = "uniform",
                  num_step: int = 0,
+                 box_mode: bool = False,
                  save_output: bool = True) -> None:
         """ Initialize a solver.
 
@@ -50,6 +51,7 @@ class GenericSolver:
         self.A: PETSc_Mat | None            = None
         self.b: PETSc_Vec | None            = None
         self.bilinear_form: Form | None     = None
+        self.box_mode: bool                 = box_mode
         self.eta_h_H10: Function | None     = None
         self.eta_h_L2: Function | None      = None
         self.err_H10: Function | None       = None
@@ -386,6 +388,7 @@ class PhiFEMSolver(GenericSolver):
                  PETSc_solver: PETSc_KSP,
                  ref_strat: str = "uniform",
                  levelset_element: _ElementBase | None = None,
+                 box_mode: bool = False,
                  use_fine_space: bool = False,
                  num_step: int = 0,
                  save_output: bool = True) -> None:
@@ -397,6 +400,7 @@ class PhiFEMSolver(GenericSolver):
             PETSc_solver: the PETSc solver used to solve the finite element linear system.
             ref_strat: the refinement strategy ('uniform' for uniform refinement, 'H10' for adaptive refinement based on the H10 residual estimator, 'L2' for adaptive refinement based on the L2 residual estimator).
             levelset_element: the finite element used to discretize the levelset function.
+            box_mode: if True, does not compute submeshes and only refines the initial background mesh.
             use_fine_space: use the proper fine space for the phiFEM solution (i.e. space of degree FE_degree + levelset_degree).
             num_step: the refinement step number.
             save_output: if True, save the functions, meshes and values to the disk.
@@ -406,6 +410,7 @@ class PhiFEMSolver(GenericSolver):
                          PETSc_solver,
                          ref_strat=ref_strat,
                          num_step=num_step,
+                         box_mode=box_mode,
                          save_output=save_output)
 
         self.bg_mesh_cells_tags: MeshTags | None  = None
@@ -423,7 +428,6 @@ class PhiFEMSolver(GenericSolver):
         self.submesh_cells_tags: MeshTags | None  = None
         self.use_fine_space: bool                 = use_fine_space
         self.v0: Function | None                  = None
-        self.v0_gamma: Function | None            = None
 
     def _compute_normal(self, mesh: Mesh) -> Function:
         """ Private method used to compute the outward normal to Omega_h.
@@ -506,7 +510,7 @@ class PhiFEMSolver(GenericSolver):
     #     dest_mesh_fct.x.scatter_forward()
     #     return dest_mesh_fct
 
-    def compute_tags(self, detection_element: _ElementBase | None = None, padding: bool = False, plot: bool = False) -> None:
+    def compute_tags(self, detection_element: _ElementBase | None = None, plot: bool = False) -> None:
         """ Compute the mesh tags.
 
         Args:
@@ -536,28 +540,34 @@ class PhiFEMSolver(GenericSolver):
         if self.bg_mesh_cells_tags is None:
             raise TypeError("SOLVER_NAME.bg_mesh_cells_tags is None.")
         
-        omega_h_cells = np.unique(np.hstack([self.bg_mesh_cells_tags.find(1),
-                                             self.bg_mesh_cells_tags.find(2),
-                                             self.bg_mesh_cells_tags.find(4)]))
-        self.submesh, c_map, v_map, n_map = dfx.mesh.create_submesh(self.mesh,
-                                                                    self.mesh.topology.dim,
-                                                                    omega_h_cells) # type: ignore
+        if self.box_mode:
+            #self.submesh = dfx.mesh.Mesh(self.mesh, self.mesh.ufl_domain())
+            self.submesh = self.mesh
+            working_cells_tags = self.bg_mesh_cells_tags
+            working_mesh = self.mesh
+        else:
+            omega_h_cells = np.unique(np.hstack([self.bg_mesh_cells_tags.find(1),
+                                                self.bg_mesh_cells_tags.find(2),
+                                                self.bg_mesh_cells_tags.find(4)]))
+            self.submesh, c_map, v_map, n_map = dfx.mesh.create_submesh(self.mesh,
+                                                                        self.mesh.topology.dim,
+                                                                        omega_h_cells) # type: ignore
 
-        if self.submesh is None:
-            raise TypeError("SOLVER_NAME.submesh is None.")
+            if self.submesh is None:
+                raise TypeError("SOLVER_NAME.submesh is None.")
 
-        self._transfer_cells_tags(c_map)
-        if self.submesh_cells_tags is None:
-            raise TypeError("SOLVER_NAME.submesh_cells_tags is None.")
+            self._transfer_cells_tags(c_map)
+            if self.submesh_cells_tags is None:
+                raise TypeError("SOLVER_NAME.submesh_cells_tags is None.")
 
-        working_cells_tags = self.submesh_cells_tags
-        working_mesh = self.submesh
+            working_cells_tags = self.submesh_cells_tags
+            working_mesh = self.submesh
 
-        submesh_levelset_space = dfx.fem.functionspace(working_mesh, detection_element)
-        submesh_discrete_levelset = self.levelset.interpolate(submesh_levelset_space)
+        working_mesh_levelset_space = dfx.fem.functionspace(working_mesh, detection_element)
+        working_mesh_discrete_levelset = self.levelset.interpolate(working_mesh_levelset_space)
 
         self.facets_tags = tag_facets(working_mesh,
-                                      submesh_discrete_levelset,
+                                      working_mesh_discrete_levelset,
                                       working_cells_tags,
                                       plot=plot)
     
@@ -583,52 +593,25 @@ class PhiFEMSolver(GenericSolver):
                 raise TypeError("SOLVER_NAME.levelset_element is None.")
             quadrature_degree = 2 * (self.levelset_element.basix_element.degree + 1)
 
-        # If the submesh hasn't been created, we work directly on the background mesh.
-        # We need to set-up a "boolean" DG0 function to represent Omega_h and define a custom outward pointing normal to partial Omega_h.
-        if self.submesh is None:
+        if self.box_mode:
             if self.mesh is None:
-                raise TypeError("SOLVER_NAME.mesh is None.")
+                raise ValueError("SOLVER_NAME.mesh is None.")
             working_mesh = self.mesh
             if self.bg_mesh_cells_tags is None:
-                raise TypeError("SOLVER_NAME.bg_mesh_cells_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)")
+                raise ValueError("SOLVER_NAME.bg_mesh_cells_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)")
             cells_tags = self.bg_mesh_cells_tags
         else:
+            if self.submesh is None:
+                raise ValueError("SOLVER_NAME.submesh is None.")
             working_mesh = self.submesh
             if self.submesh_cells_tags is None:
-                raise TypeError("SOLVER_NAME.submesh_cells_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)")
+                raise ValueError("SOLVER_NAME.submesh_cells_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)")
             cells_tags = self.submesh_cells_tags
-        
-        Omega_h_n = self._compute_normal(working_mesh)
-        
-        # Set up a DG function with values 1. in Omega_h and 0. outside
-        DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
-        CG1Element = element("CG", working_mesh.topology.cell_name(), 1)
-        V0 = dfx.fem.functionspace(working_mesh, DG0Element)
-        v0 = dfx.fem.Function(V0)
-        v0.vector.set(0.)
-        interior_cells = cells_tags.indices[np.where(cells_tags.values == 1)]
-        cut_cells      = cells_tags.indices[np.where(cells_tags.values == 2)]
-        Omega_h_cells = np.union1d(interior_cells, cut_cells)
 
-        # We do not need the dofs here since cells and DG0 dofs share the same indices in dolfinx
-        v0.x.array[Omega_h_cells] = 1.
-
-        V1 = dfx.fem.functionspace(working_mesh, CG1Element)
-        v0_gamma = dfx.fem.Function(V1)
-        v0_gamma.vector.set(0.)
-        working_mesh.topology.create_connectivity(2, 2)
-        gamma_dofs = dfx.fem.locate_dofs_topological(V1, 2, cut_cells)
-        v0_gamma.x.array[gamma_dofs] = 1.
-
-        with XDMFFile(working_mesh.comm, "output_phiFEM/v0.xdmf", "w") as of:
-            of.write_mesh(working_mesh)
-            of.write_function(v0)
-
-        with XDMFFile(working_mesh.comm, "output_phiFEM/v0_gamma.xdmf", "w") as of:
-            of.write_mesh(working_mesh)
-            of.write_function(v0_gamma)
-        
         # TODO: modify to get it work in parallel
+        interior_cells = cells_tags.find(1)
+        cut_cells      = cells_tags.find(2)
+        Omega_h_cells = np.union1d(interior_cells, cut_cells)
         self.FE_space = dfx.fem.functionspace(working_mesh, self.FE_element)
         cdim = working_mesh.topology.dim
         working_mesh.topology.create_connectivity(cdim, cdim)
@@ -661,12 +644,35 @@ class PhiFEMSolver(GenericSolver):
                          subdomain_data=self.facets_tags,
                          metadata={"quadrature_degree": quadrature_degree})
 
+        if self.box_mode:
+            Omega_h_n = self._compute_normal(working_mesh)
+            
+            # Set up a DG function with values 1. in Omega_h and 0. outside
+            DG0Element = element("DG", working_mesh.topology.cell_name(), 0)
+            V0 = dfx.fem.functionspace(working_mesh, DG0Element)
+            v0 = dfx.fem.Function(V0)
+            v0.vector.set(0.)
+
+            # We do not need the dofs here since cells and DG0 dofs share the same indices in dolfinx
+            v0.x.array[Omega_h_cells] = 1.
+
+            with XDMFFile(working_mesh.comm, "output_phiFEM/v0.xdmf", "w") as of:
+                of.write_mesh(working_mesh)
+                of.write_function(v0)
+            
+            dBoundary = dS(4)
+            boundary = inner(2. * avg(inner(grad(phi_h * w), Omega_h_n) * v0),
+                             2. * avg(phi_h * v * v0))
+        else:
+            dBoundary = ufl.Measure("ds",
+                                    domain=working_mesh,
+                                    metadata={"quadrature_degree": quadrature_degree})
+            boundary = inner(inner(grad(phi_h * w), n), phi_h * v)
+
         """
         Bilinear form
         """
         stiffness = inner(grad(phi_h * w), grad(phi_h * v))
-        boundary = inner(2. * avg(inner(grad(phi_h * w), Omega_h_n) * v0),
-                         2. * avg(phi_h * v * v0))
 
         penalization_facets = sigma * avg(h) * inner(jump(grad(phi_h * w), n),
                                                      jump(grad(phi_h * v), n))
@@ -674,24 +680,27 @@ class PhiFEMSolver(GenericSolver):
                                                   div(grad(phi_h * v)))
 
         a = stiffness             * (dx(1) + dx(2)) \
-            - boundary            * dS(4) \
+            - boundary            * dBoundary \
             + penalization_facets * dS(2) \
             + penalization_cells  * dx(2)
         
-        a += inner(w, v) * v0 * (dx(3) + dx(4))
+        if self.box_mode:
+            # Useless term so that PETSc doesn't throw a Segfault at my face
+            a += inner(w, v) * v0 * (dx(3) + dx(4))
 
-        # Dummy Dirichlet boundary condition to force the exterior dofs (in the padding region) to 0
+            # In box_mode with turn all the exterior dofs to zero by setting a dummy Dirichlet BC on them
+            boundary_facets = self.facets_tags.find(4)
+            strict_exterior_facets = self.facets_tags.find(3)
+            dofs_exterior = dfx.fem.locate_dofs_topological(self.FE_space, cdim - 1, strict_exterior_facets)
+            dofs_boundary = dfx.fem.locate_dofs_topological(self.FE_space, cdim - 1, boundary_facets)
+            inactive_dofs = np.setdiff1d(dofs_exterior, dofs_boundary)
+
+            dbc_values = dfx.fem.Function(self.FE_space)
+            dbc = dfx.fem.dirichletbc(dbc_values, inactive_dofs)
+            self.bcs.append(dbc)
+
         if self.facets_tags is None:
             raise ValueError("SOLVER_NAME.facets_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)")
-        boundary_facets = self.facets_tags.find(4)
-        strict_exterior_facets = self.facets_tags.find(3)
-        dofs_exterior = dfx.fem.locate_dofs_topological(self.FE_space, cdim - 1, strict_exterior_facets)
-        dofs_boundary = dfx.fem.locate_dofs_topological(self.FE_space, cdim - 1, boundary_facets)
-        inactive_dofs = np.setdiff1d(dofs_exterior, dofs_boundary)
-
-        dbc_values = dfx.fem.Function(self.FE_space)
-        dbc = dfx.fem.dirichletbc(dbc_values, inactive_dofs)
-        self.bcs.append(dbc)
 
         """
         Linear form
@@ -705,7 +714,6 @@ class PhiFEMSolver(GenericSolver):
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)
         self.v0 = v0
-        self.v0_gamma = v0_gamma
         return v0, dx, dS, num_dofs
     
     def solve(self) -> None:
@@ -765,10 +773,20 @@ class PhiFEMSolver(GenericSolver):
         if self.solution is None:
             raise ValueError("SOLVER_NAME.solution is None, did you forget to solver ? (SOLVER_NAME.solve)")
         uh = self.solution
-        working_cells_tags = self.submesh_cells_tags
-        if self.submesh is None:
-            raise ValueError("SOLVER_NAME.submesh is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)")
-        working_mesh = self.submesh
+        if self.box_mode:
+            if self.bg_mesh_cells_tags is None:
+                raise ValueError("SOLVER_NAME.bg_mesh_cells_tags is None, did you forget to compute tags ? (SOLVER_NAME.compute_tags)")
+            working_cells_tags = self.bg_mesh_cells_tags
+            if self.mesh is None:
+                raise ValueError("SOLVER_NAME.mesh is None.")
+            working_mesh = self.mesh
+        else:
+            if self.submesh_cells_tags is None:
+                raise ValueError("SOLVER_NAME.submesh_cells_tags is None, did you forget to compute tags ? (SOLVER_NAME.compute_tags)")
+            working_cells_tags = self.submesh_cells_tags
+            if self.submesh is None:
+                raise ValueError("SOLVER_NAME.submesh is None.")
+            working_mesh = self.submesh
 
         if quadrature_degree is None:
             k = uh.function_space.element.basix_element.degree
@@ -809,10 +827,9 @@ class PhiFEMSolver(GenericSolver):
         levelset_degree = self.levelset_space.element.basix_element.degree
         CGfElement = element("Lagrange", working_mesh.topology.cell_name(), levelset_degree + 1)
         Vf = dfx.fem.functionspace(working_mesh, CGfElement)
-
+        
         # Get the dofs except those on the cut cells
-        assert self.submesh_cells_tags is not None, "SOLVER_NAME.submesh_cells_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags)"
-        cut_cells = self.submesh_cells_tags.find(2)
+        cut_cells = working_cells_tags.find(2)
         cut_cells_dofs = dfx.fem.locate_dofs_topological(Vf, 2, cut_cells)
         num_dofs_global = Vf.dofmap.index_map.size_global * Vf.dofmap.index_map_bs
         all_dofs = np.arange(num_dofs_global)
@@ -825,7 +842,9 @@ class PhiFEMSolver(GenericSolver):
         phi2.interpolate(self.levelset)
 
         wh2 = dfx.fem.Function(Vf)
-        assert self.solution_wh is not None, "SOLVER_NAME.solution_wh is None, did you forget to solve ?(SOLVER_NAME.solve)"
+        if self.solution_wh is None:
+            raise ValueError("SOLVER_NAME.solution_wh is None, did you forget to solve ?(SOLVER_NAME.solve)")
+
         wh2.interpolate(self.solution_wh)
 
         correction_function = dfx.fem.Function(Vf)
@@ -834,9 +853,6 @@ class PhiFEMSolver(GenericSolver):
 
         correction_function_V = dfx.fem.Function(self.FE_space)
         correction_function_V.interpolate(correction_function)
-        # Boundary correction function as the restriction of uh near the boundary
-        # uh_boundary = dfx.fem.Function(self.FE_space)
-        # uh_boundary.x.array[:] = self.solution_wh.x.array[:] * self.v0_gamma.x.array[:]
 
         geometry_correction = inner(grad(correction_function),
                                     grad(correction_function))
