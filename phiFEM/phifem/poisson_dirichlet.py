@@ -90,7 +90,7 @@ def poisson_dirichlet_phiFEM(cl: float,
     for i in range(max_it):
         CG1Element = element("Lagrange", working_mesh.topology.cell_name(), 1)
         # Very fine element for boundary detection
-        levelsetElement = element("Lagrange", working_mesh.topology.cell_name(), 4)
+        detectionElement = element("Lagrange", working_mesh.topology.cell_name(), 4)
 
         # Parametrization of the PETSc solver
         options = Options()
@@ -111,7 +111,7 @@ def poisson_dirichlet_phiFEM(cl: float,
                                      save_output=save_output)
         phiFEM_solver.set_source_term(rhs)
         phiFEM_solver.set_levelset(phi)
-        phiFEM_solver.compute_tags(levelset_element=levelsetElement, padding=False, plot=True)
+        phiFEM_solver.compute_tags(detection_element=detectionElement, padding=False, plot=False)
         v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
         results_saver.add_new_value("dofs", num_dofs)
         phiFEM_solver.assemble()

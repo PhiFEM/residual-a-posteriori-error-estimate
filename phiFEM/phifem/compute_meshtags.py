@@ -159,7 +159,7 @@ def tag_facets(mesh: Mesh,
     real_boundary_facets = np.intersect1d(c2f_map[cut_cells], 
                                           dfx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.ones_like(x[1]).astype(bool)))
     boundary_facets = np.union1d(exterior_boundary_facets, real_boundary_facets)
-    
+
     # Cut facets F_h^Γ
     cut_facets = np.setdiff1d(c2f_map[cut_cells],
                               np.union1d(exterior_boundary_facets, boundary_facets))

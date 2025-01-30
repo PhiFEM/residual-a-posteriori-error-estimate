@@ -453,16 +453,18 @@ class PhiFEMSolver(GenericSolver):
         
         cdim = self.submesh.topology.dim
         # TODO: change this line to allow parallel computing
-        bg_mesh_interior = self.bg_mesh_cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 1)]
-        bg_cells_omega_h_gamma = self.bg_mesh_cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 2)]
-        bg_cells_padding = self.bg_mesh_cells_tags.indices[np.where(self.bg_mesh_cells_tags.values == 4)]
+        bg_mesh_interior       = self.bg_mesh_cells_tags.find(1)
+        bg_cells_omega_h_gamma = self.bg_mesh_cells_tags.find(2)
+        bg_cells_padding       = self.bg_mesh_cells_tags.find(4)
 
-        mask_interior = np.in1d(cmap, bg_mesh_interior)
+        mask_interior      = np.in1d(cmap, bg_mesh_interior)
         mask_omega_h_gamma = np.in1d(cmap, bg_cells_omega_h_gamma)
-        mask_padding = np.in1d(cmap, bg_cells_padding)
-        submesh_interior = np.where(mask_interior)[0]
+        mask_padding       = np.in1d(cmap, bg_cells_padding)
+
+        submesh_interior            = np.where(mask_interior)[0]
         submesh_cells_omega_h_gamma = np.where(mask_omega_h_gamma)[0]
-        submesh_cells_padding = np.where(mask_padding)[0]
+        submesh_cells_padding       = np.where(mask_padding)[0]
+
         list_cells = [submesh_interior,
                       submesh_cells_omega_h_gamma,
                       submesh_cells_padding]
@@ -504,7 +506,7 @@ class PhiFEMSolver(GenericSolver):
     #     dest_mesh_fct.x.scatter_forward()
     #     return dest_mesh_fct
 
-    def compute_tags(self, levelset_element: _ElementBase | None = None, padding: bool = False, plot: bool = False) -> None:
+    def compute_tags(self, detection_element: _ElementBase | None = None, padding: bool = False, plot: bool = False) -> None:
         """ Compute the mesh tags.
 
         Args:
@@ -518,10 +520,10 @@ class PhiFEMSolver(GenericSolver):
         if self.levelset is None:
             raise ValueError("SOLVER_NAME.levelset is None, did you forget to set the levelset ? (SOLVER_NAME.set_levelset)")
         
-        if levelset_element is None:
-            levelset_element = self.levelset_element
+        if detection_element is None:
+            detection_element = self.levelset_element
 
-        bg_levelset_space = dfx.fem.functionspace(self.mesh, self.levelset_element)
+        bg_levelset_space = dfx.fem.functionspace(self.mesh, detection_element)
         bg_discrete_levelset = self.levelset.interpolate(bg_levelset_space)
 
         self.bg_mesh_cells_tags = tag_cells(self.mesh,
@@ -537,7 +539,9 @@ class PhiFEMSolver(GenericSolver):
         omega_h_cells = np.unique(np.hstack([self.bg_mesh_cells_tags.find(1),
                                              self.bg_mesh_cells_tags.find(2),
                                              self.bg_mesh_cells_tags.find(4)]))
-        self.submesh, c_map, v_map, n_map = dfx.mesh.create_submesh(self.mesh, self.mesh.topology.dim, omega_h_cells) # type: ignore
+        self.submesh, c_map, v_map, n_map = dfx.mesh.create_submesh(self.mesh,
+                                                                    self.mesh.topology.dim,
+                                                                    omega_h_cells) # type: ignore
 
         if self.submesh is None:
             raise TypeError("SOLVER_NAME.submesh is None.")
@@ -549,7 +553,7 @@ class PhiFEMSolver(GenericSolver):
         working_cells_tags = self.submesh_cells_tags
         working_mesh = self.submesh
 
-        submesh_levelset_space = dfx.fem.functionspace(working_mesh, levelset_element)
+        submesh_levelset_space = dfx.fem.functionspace(working_mesh, detection_element)
         submesh_discrete_levelset = self.levelset.interpolate(submesh_levelset_space)
 
         self.facets_tags = tag_facets(working_mesh,
