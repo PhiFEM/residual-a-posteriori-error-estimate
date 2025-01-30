@@ -504,7 +504,7 @@ class PhiFEMSolver(GenericSolver):
     #     dest_mesh_fct.x.scatter_forward()
     #     return dest_mesh_fct
 
-    def compute_tags(self, padding: bool = False, plot: bool = False) -> None:
+    def compute_tags(self, levelset_element: _ElementBase | None = None, padding: bool = False, plot: bool = False) -> None:
         """ Compute the mesh tags.
 
         Args:
@@ -517,6 +517,9 @@ class PhiFEMSolver(GenericSolver):
         # Tag cells of the background mesh. Used to tag the facets and/or create the submesh.
         if self.levelset is None:
             raise ValueError("SOLVER_NAME.levelset is None, did you forget to set the levelset ? (SOLVER_NAME.set_levelset)")
+        
+        if levelset_element is None:
+            levelset_element = self.levelset_element
 
         bg_levelset_space = dfx.fem.functionspace(self.mesh, self.levelset_element)
         bg_discrete_levelset = self.levelset.interpolate(bg_levelset_space)
@@ -546,7 +549,7 @@ class PhiFEMSolver(GenericSolver):
         working_cells_tags = self.submesh_cells_tags
         working_mesh = self.submesh
 
-        submesh_levelset_space = dfx.fem.functionspace(working_mesh, self.levelset_element)
+        submesh_levelset_space = dfx.fem.functionspace(working_mesh, levelset_element)
         submesh_discrete_levelset = self.levelset.interpolate(submesh_levelset_space)
 
         self.facets_tags = tag_facets(working_mesh,

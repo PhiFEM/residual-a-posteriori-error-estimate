@@ -100,7 +100,7 @@ if __name__=="__main__":
 
     levelset = Levelset(expression_levelset)
 
-    k = 2
+    k = 4
     CGElement = element("Lagrange", mesh.topology.cell_name(), k)
     V = dfx.fem.functionspace(mesh, CGElement)
     discrete_levelset = dfx.fem.Function(V)

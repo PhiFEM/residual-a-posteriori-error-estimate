@@ -38,15 +38,15 @@ def tag_cells(mesh: Mesh,
         xs = np.linspace(0., 1., levelset_degree + 1)
         xx, yy = np.meshgrid(xs, xs)
         x_coords = xx.reshape((1, xx.shape[0] * xx.shape[1]))
-        y_coords = xx.reshape((1, yy.shape[0] * yy.shape[1]))
+        y_coords = yy.reshape((1, yy.shape[0] * yy.shape[1]))
         points = np.vstack([x_coords, y_coords])
         quadrature_points = points[:,points[1,:] <= np.ones_like(points[0,:])-points[0,:]]
     elif mesh.topology.cell_name() == "tetrahedron":
         xs = np.linspace(0., 1., levelset_degree + 1)
         xx, yy, zz = np.meshgrid(xs, xs, xs)
         x_coords = xx.reshape((1, xx.shape[0] * xx.shape[1]))
-        y_coords = xx.reshape((1, yy.shape[0] * yy.shape[1]))
-        z_coords = xx.reshape((1, zz.shape[0] * zz.shape[1]))
+        y_coords = yy.reshape((1, yy.shape[0] * yy.shape[1]))
+        z_coords = zz.reshape((1, zz.shape[0] * zz.shape[1]))
         points = np.vstack([x_coords, y_coords, z_coords])
         quadrature_points = points[:,points[2,:] <= np.ones_like(points[0,:])-points[0,:]-points[1,:]]
     else:
@@ -78,12 +78,19 @@ def tag_cells(mesh: Mesh,
     # cells_detection_denom_vec is not supposed to be zero, this would mean that the levelset is zero at all dofs in a cell, which is not allowed.
     if np.any(np.isclose(cells_detection_denom_vec, 0.)):
         raise ValueError("The discrete levelset vanishes on at least one entire mesh cell.")
-
-    cells_detection_vec = cells_detection_num_vec/cells_detection_denom_vec
-    exterior_indices = np.where(cells_detection_vec.array == 1.)
-    interior_indices = np.where(cells_detection_vec.array == -1.)
-    cut_indices      = np.where(np.logical_and(cells_detection_vec.array != -1., 
-                                               cells_detection_vec.array != 1.))
+    
+    cells_detection_vec = cells_detection_num_vec.array/cells_detection_denom_vec.array
+    detection = dfx.fem.Function(V0)
+    detection.x.array[:] = cells_detection_vec
+    from dolfinx.io import XDMFFile
+    with XDMFFile(mesh.comm, "./detection.xdmf", "w") as of:
+        of.write_mesh(mesh)
+        of.write_function(detection)
+    
+    exterior_indices = np.where(cells_detection_vec == 1.)[0]
+    interior_indices = np.where(cells_detection_vec == -1.)[0]
+    cut_indices      = np.where(np.logical_and(cells_detection_vec > -1., 
+                                               cells_detection_vec < 1.))[0]
     
     if len(interior_indices) == 0:
         raise ValueError("No interior cells (1)!")
@@ -93,13 +100,13 @@ def tag_cells(mesh: Mesh,
     # Create the meshtags from the indices.
     indices = np.hstack([exterior_indices,
                          interior_indices,
-                         cut_indices]).astype(np.int32)[0]
+                         cut_indices]).astype(np.int32)
     exterior_marker = np.full_like(exterior_indices, 3).astype(np.int32)
     interior_marker = np.full_like(interior_indices, 1).astype(np.int32)
     cut_marker      = np.full_like(cut_indices,      2).astype(np.int32)
     markers = np.hstack([exterior_marker,
                          interior_marker,
-                         cut_marker]).astype(np.int32)[0]
+                         cut_marker]).astype(np.int32)
     sorted_indices = np.argsort(indices)
 
     cells_tags = dfx.mesh.meshtags(mesh,
@@ -149,8 +156,10 @@ def tag_facets(mesh: Mesh,
     exterior_boundary_facets = np.intersect1d(c2f_map[exterior_cells],
                                               c2f_map[cut_cells])
     # Boundary facets ∂Ω_h
-    boundary_facets = np.intersect1d(c2f_map[cut_cells], 
-                                     dfx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.ones_like(x[1]).astype(bool)))
+    real_boundary_facets = np.intersect1d(c2f_map[cut_cells], 
+                                          dfx.mesh.locate_entities_boundary(mesh, fdim, lambda x: np.ones_like(x[1]).astype(bool)))
+    boundary_facets = np.union1d(exterior_boundary_facets, real_boundary_facets)
+    
     # Cut facets F_h^Γ
     cut_facets = np.setdiff1d(c2f_map[cut_cells],
                               np.union1d(exterior_boundary_facets, boundary_facets))
