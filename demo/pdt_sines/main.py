@@ -22,7 +22,7 @@ def rotation(angle, x):
 def tilted_square(x):
     def fct(x):
         return jnp.sum(jnp.abs(rotation(-tilt_angle + jnp.pi/4., x)), axis=0)
-    return fct(x) - np.sqrt(2.)/2.
+    return fct(x) - jnp.sqrt(2.)/2.
 
 # Levelset as a pyramid function
 # def expression_levelset(x):

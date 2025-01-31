@@ -114,7 +114,6 @@ def poisson_dirichlet_phiFEM(cl: float,
         phiFEM_solver.set_levelset(phi)
         phiFEM_solver.compute_tags(detection_element=detectionElement, plot=False)
         v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation()
-        results_saver.add_new_value("dofs", num_dofs)
         phiFEM_solver.assemble()
         phiFEM_solver.solve()
         uh = phiFEM_solver.get_solution()
@@ -142,6 +141,7 @@ def poisson_dirichlet_phiFEM(cl: float,
                         res_name = "eta_" + res_letter + "_" + norm
                         assemble_and_save_residual(working_mesh, results_saver, eta, res_name, i)
 
+            results_saver.add_new_value("dofs", num_dofs)
             results_saver.save_function(eta_h_H10,           f"eta_h_H10_{str(i).zfill(2)}")
             results_saver.save_function(eta_h_L2,            f"eta_h_L2_{str(i).zfill(2)}")
             results_saver.save_function(phiV,                f"phi_V_{str(i).zfill(2)}")

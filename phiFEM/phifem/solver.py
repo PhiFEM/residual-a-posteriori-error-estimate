@@ -645,6 +645,8 @@ class PhiFEMSolver(GenericSolver):
                          metadata={"quadrature_degree": quadrature_degree})
 
         if self.box_mode:
+            # In box_mode we need to compute the outward normal to Omega_h, this is the role of Omega_h_n.
+            # In addition, we multiply by the indicator function v0 in order to remove the contributions of avg from outside Omega_h.
             Omega_h_n = self._compute_normal(working_mesh)
             
             # Set up a DG function with values 1. in Omega_h and 0. outside
@@ -655,15 +657,13 @@ class PhiFEMSolver(GenericSolver):
 
             # We do not need the dofs here since cells and DG0 dofs share the same indices in dolfinx
             v0.x.array[Omega_h_cells] = 1.
+            self.v0 = v0
 
-            with XDMFFile(working_mesh.comm, "output_phiFEM/v0.xdmf", "w") as of:
-                of.write_mesh(working_mesh)
-                of.write_function(v0)
-            
             dBoundary = dS(4)
             boundary = inner(2. * avg(inner(grad(phi_h * w), Omega_h_n) * v0),
                              2. * avg(phi_h * v * v0))
         else:
+            # When we are not in box_mode, the boundary term is simpler since we have access to the normal n and there is no need to use avg.
             dBoundary = ufl.Measure("ds",
                                     domain=working_mesh,
                                     metadata={"quadrature_degree": quadrature_degree})
@@ -674,21 +674,23 @@ class PhiFEMSolver(GenericSolver):
         """
         stiffness = inner(grad(phi_h * w), grad(phi_h * v))
 
-        penalization_facets = sigma * avg(h) * inner(jump(grad(phi_h * w), n),
+        # The stabilization terms
+        stabilization_facets = sigma * avg(h) * inner(jump(grad(phi_h * w), n),
                                                      jump(grad(phi_h * v), n))
-        penalization_cells = sigma * h**2 * inner(div(grad(phi_h * w)),
+        stabilization_cells = sigma * h**2 * inner(div(grad(phi_h * w)),
                                                   div(grad(phi_h * v)))
 
+        # The φ-FEM bilinear form
         a = stiffness             * (dx(1) + dx(2)) \
             - boundary            * dBoundary \
-            + penalization_facets * dS(2) \
-            + penalization_cells  * dx(2)
+            + stabilization_facets * dS(2) \
+            + stabilization_cells  * dx(2)
         
         if self.box_mode:
             # Useless term so that PETSc doesn't throw a Segfault at my face
             a += inner(w, v) * v0 * (dx(3) + dx(4))
 
-            # In box_mode with turn all the exterior dofs to zero by setting a dummy Dirichlet BC on them
+            # In box_mode we turn all the exterior dofs to zero by setting a dummy zero Dirichlet BC on them
             boundary_facets = self.facets_tags.find(4)
             strict_exterior_facets = self.facets_tags.find(3)
             dofs_exterior = dfx.fem.locate_dofs_topological(self.FE_space, cdim - 1, strict_exterior_facets)
@@ -706,15 +708,14 @@ class PhiFEMSolver(GenericSolver):
         Linear form
         """
         rhs = inner(f_h, phi_h * v)
-        penalization_rhs = sigma * h**2 * inner(f_h, div(grad(phi_h * v)))
+        stabilization_rhs = sigma * h**2 * inner(f_h, div(grad(phi_h * v)))
 
         L = rhs                 * (dx(1) + dx(2))\
-            - penalization_rhs  * dx(2)
+            - stabilization_rhs  * dx(2)
 
         self.bilinear_form = dfx.fem.form(a)
         self.linear_form = dfx.fem.form(L)
-        self.v0 = v0
-        return v0, dx, dS, num_dofs
+        return self.v0, dx, dS, num_dofs
     
     def solve(self) -> None:
         """ Solve the phiFEM linear system."""
@@ -794,16 +795,16 @@ class PhiFEMSolver(GenericSolver):
             quadrature_degree_facets = max(0, k - 1)
         
         dx = ufl.Measure("dx",
-                        domain=working_mesh,
-                        subdomain_data=working_cells_tags,
-                        metadata={"quadrature_degree": quadrature_degree_cells})
+                         domain=working_mesh,
+                         subdomain_data=working_cells_tags,
+                         metadata={"quadrature_degree": quadrature_degree_cells})
         dS = ufl.Measure("dS",
-                        domain=working_mesh,
-                        subdomain_data=self.facets_tags,
-                        metadata={"quadrature_degree": quadrature_degree_facets})
+                         domain=working_mesh,
+                         subdomain_data=self.facets_tags,
+                         metadata={"quadrature_degree":  quadrature_degree_facets})
         ds = ufl.Measure("ds",
-                        domain=working_mesh,
-                        metadata={"quadrature_degree": quadrature_degree_facets})
+                         domain=working_mesh,
+                         metadata={"quadrature_degree":  quadrature_degree_facets})
 
         n   = ufl.FacetNormal(working_mesh)
         h_T = ufl.CellDiameter(working_mesh)
@@ -820,8 +821,11 @@ class PhiFEMSolver(GenericSolver):
         J_h = jump(grad(uh), -n)
 
         # Boundary correction function as (phi_h - I_h phi) w_h, where I_h phi is an interpolation of phi into a finer space.
-        assert self.levelset_space is not None, "SOLVER_NAME.levelset_space is None."
-        assert self.levelset is not None, "SOLVER_NAME.levelset is None."
+        if self.levelset_space is None:
+            raise ValueError("SOLVER_NAME.levelset_space is None.")
+        if self.levelset is None:
+            raise ValueError("SOLVER_NAME.levelset is None.")
+
         phih = self.levelset.interpolate(self.levelset_space)
 
         levelset_degree = self.levelset_space.element.basix_element.degree
