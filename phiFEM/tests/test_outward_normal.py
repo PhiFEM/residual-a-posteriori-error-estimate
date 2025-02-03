@@ -109,7 +109,7 @@ def test_outward_normal(data_name, mesh_name, levelset, save_normal=False):
 
     W0 = w0.function_space
 
-    mesh.topology.create_connectivity(fdim, 0)
+    mesh.topology.create_connectivity(cdim, cdim)
     f2v_connect = mesh.topology.connectivity(fdim, 0)
 
     f2v_map = np.reshape(f2v_connect.array, (-1, 2))

@@ -79,7 +79,7 @@ class GenericSolver:
         if source_term.expression is None:
             raise ValueError("The source term has no expression.")
         self.rhs = source_term
-    
+
     def assemble(self) -> None:
         """ Assemble the linear system."""
         self.print("Assemble linear system.")
@@ -498,18 +498,6 @@ class PhiFEMSolver(GenericSolver):
             raise ValueError("The levelset has no expression.")
         self.levelset = levelset
 
-    # def mesh2mesh_interpolation(self, origin_mesh_fct, dest_mesh_fct):
-    #     # scatter_forward has to do with ghost cells in parallel (see: https://fenicsproject.discourse.group/t/the-usage-of-the-functions-of-dolfinx/13214/4)
-    #     origin_mesh_fct.x.scatter_forward()
-    #     # See: https://github.com/FEniCS/dolfinx/blob/e4439ccca81b976d11c6f606d9c612afcf010a31/python/test/unit/fem/test_interpolation.py#L790
-    #     mesh1_2_mesh2_nmm_data = dfx.fem.create_nonmatching_meshes_interpolation_data(
-    #                                   origin_mesh_fct.function_space.mesh._cpp_object,
-    #                                   origin_mesh_fct.function_space.element,
-    #                                   origin_mesh_fct.function_space.mesh._cpp_object)
-    #     dest_mesh_fct.interpolate(origin_mesh_fct, nmm_interpolation_data=mesh1_2_mesh2_nmm_data)
-    #     dest_mesh_fct.x.scatter_forward()
-    #     return dest_mesh_fct
-
     def compute_tags(self, detection_element: _ElementBase | None = None, plot: bool = False) -> None:
         """ Compute the mesh tags.
 
@@ -573,7 +561,7 @@ class PhiFEMSolver(GenericSolver):
     
     def set_variational_formulation(self,
                                     sigma: float = 1.,
-                                    quadrature_degree: int | None = None) -> Tuple[Function, Measure, Measure, int]:
+                                    quadrature_degree: int | None = None) -> Tuple[Function | None, Measure, Measure, int]:
         """ Defines the variational formulation.
 
         Args:
@@ -691,7 +679,10 @@ class PhiFEMSolver(GenericSolver):
             a += inner(w, v) * v0 * (dx(3) + dx(4))
 
             # In box_mode we turn all the exterior dofs to zero by setting a dummy zero Dirichlet BC on them
-            boundary_facets = self.facets_tags.find(4)
+            if self.facets_tags is None:
+                raise ValueError("SOLVER_NAME.facets_tags is None, did you forget to compute the mesh tags ? (SOLVER_NAME.compute_tags())")
+            
+            boundary_facets        = self.facets_tags.find(4)
             strict_exterior_facets = self.facets_tags.find(3)
             dofs_exterior = dfx.fem.locate_dofs_topological(self.FE_space, cdim - 1, strict_exterior_facets)
             dofs_boundary = dfx.fem.locate_dofs_topological(self.FE_space, cdim - 1, boundary_facets)
