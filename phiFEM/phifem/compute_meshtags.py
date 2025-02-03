@@ -76,16 +76,12 @@ def tag_cells(mesh: Mesh,
     cells_detection_denom_vec = assemble_vector(cells_detection_denom_form)
 
     # cells_detection_denom_vec is not supposed to be zero, this would mean that the levelset is zero at all dofs in a cell, which is not allowed.
-    if np.any(np.isclose(cells_detection_denom_vec, 0.)):
-        raise ValueError("The discrete levelset vanishes on at least one entire mesh cell.")
+    # if np.any(np.isclose(cells_detection_denom_vec, 0.)):
+    #     raise ValueError("The discrete levelset vanishes on at least one entire mesh cell.")
     
     cells_detection_vec = cells_detection_num_vec.array/cells_detection_denom_vec.array
     detection = dfx.fem.Function(V0)
     detection.x.array[:] = cells_detection_vec
-    from dolfinx.io import XDMFFile
-    with XDMFFile(mesh.comm, "./detection.xdmf", "w") as of:
-        of.write_mesh(mesh)
-        of.write_function(detection)
     
     exterior_indices = np.where(cells_detection_vec == 1.)[0]
     interior_indices = np.where(cells_detection_vec == -1.)[0]
@@ -171,12 +167,12 @@ def tag_facets(mesh: Mesh,
     exterior_facets = np.setdiff1d(c2f_map[exterior_cells],
                                    exterior_boundary_facets)
     
-    # if len(interior_facets) == 0:
-    #     raise ValueError("No interior facets (1)!")
-    # if len(cut_facets) == 0:
-    #     raise ValueError("No cut facets (2)!")
-    # if len(boundary_facets) == 0:
-    #     raise ValueError("No boundary facets (4)!")
+    if len(interior_facets) == 0:
+        raise ValueError("No interior facets (1)!")
+    if len(cut_facets) == 0:
+        raise ValueError("No cut facets (2)!")
+    if len(boundary_facets) == 0:
+        raise ValueError("No boundary facets (4)!")
     
     # Create the meshtags from the indices.
     indices = np.hstack([exterior_facets,

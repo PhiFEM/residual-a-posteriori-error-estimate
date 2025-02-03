@@ -51,6 +51,8 @@ class ResultsSaver:
             function: dolfinx.fem.Function, the finite element function to save.
             file_name: str, the name of the XDMF file storing the function.
         """
+        if function is None:
+            raise ValueError("function is None.")
         element_family = function.function_space.element.basix_element.family.name
         mesh = function.function_space.mesh
         degree = function.function_space.element.basix_element.degree
