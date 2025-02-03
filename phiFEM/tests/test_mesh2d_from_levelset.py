@@ -1,7 +1,7 @@
 import itertools
 import numpy as np
 import pytest
-from phiFEM.phifem.mesh_scripts import mesh2d_from_levelset
+from phiFEM.phifem.poisson_dirichlet import FEMRefinementLoop
 from phiFEM.phifem.continuous_functions import Levelset
 
 """
@@ -108,12 +108,10 @@ def test_mesh2d_from_levelset(lc, data):
         ax.scatter(geom_vertices[0, :], geom_vertices[1, :])
     fig.savefig(f"{data_name}_{str(lc)}.png")
 
-    boundary_vertices = mesh2d_from_levelset(lc,
-                                             levelset,
-                                             level=0.,
-                                             bbox=bbox,
-                                             geom_vertices=geom_vertices,
-                                             output_dir=None)
+    dummy_loop = FEMRefinementLoop(lc,1,"uniform",levelset.expression,"",geometry_vertices=geom_vertices, save_output=False)
+    dummy_loop.set_bbox(bbox)
+    
+    boundary_vertices = dummy_loop.mesh2d_from_levelset()
 
     err_max_to_boundary = np.max(np.abs(levelset(boundary_vertices)))
 

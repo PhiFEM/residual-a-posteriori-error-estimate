@@ -535,8 +535,8 @@ class PhiFEMSolver(GenericSolver):
             working_mesh = self.mesh
         else:
             omega_h_cells = np.unique(np.hstack([self.bg_mesh_cells_tags.find(1),
-                                                self.bg_mesh_cells_tags.find(2),
-                                                self.bg_mesh_cells_tags.find(4)]))
+                                                 self.bg_mesh_cells_tags.find(2),
+                                                 self.bg_mesh_cells_tags.find(4)]))
             self.submesh, c_map, v_map, n_map = dfx.mesh.create_submesh(self.mesh,
                                                                         self.mesh.topology.dim,
                                                                         omega_h_cells) # type: ignore
@@ -744,7 +744,122 @@ class PhiFEMSolver(GenericSolver):
         if self.levelset_space is None:
             raise ValueError("SOLVER_NAME.levelset_space is None, did you forget to set the variational formulation ? (SOLVER_NAME.set_variational_formulation)")
         return self.levelset_space
+    
+    def _compute_boundary_correction_function(self, working_mesh: Mesh, entities_tags: MeshTags, refinement_type: str) -> Function:
+        """ Compute the boundary correction function.
 
+        Args:
+            working_mesh: the current mesh.
+            entities_tags: the cells tags if refinement_type=='p', the facets tags if refinement_type=='h'.
+            refinement_type: 'p' for p-refinement boundary correction, 'h' for h-refinement boundary correction.
+        
+        Returns: the correction function.
+        """
+        if refinement_type not in ['p', 'h']:
+            raise ValueError("refinement_type must be 'p' or 'h'.")
+        
+        phih = self.levelset.interpolate(self.levelset_space)
+        if refinement_type=='p':
+            """
+            p-refinement boundary correction
+            correction_function = (φ_h - φ_f) w_h
+            where:
+            - φ_h is the discretization of the levelset in the levelset space.
+            - φ_f is the discretization of the levelset in a p-finer space (lagrange of degree levelset_degree + 1).
+            """
+            if entities_tags.dim != working_mesh.topology.dim:
+                raise ValueError("In 'p' refinement, the entities_tags must be of same dim as the mesh (cells).")
+
+            levelset_degree = self.levelset_space.element.basix_element.degree
+            CGfElement = element("Lagrange", working_mesh.topology.cell_name(), levelset_degree + 1)
+            V_correction = dfx.fem.functionspace(working_mesh, CGfElement)
+
+            # Get the dofs except those on the cut cells
+            cut_cells = entities_tags.find(2)
+            cut_cells_dofs = dfx.fem.locate_dofs_topological(V_correction, 2, cut_cells)
+            num_dofs_global = V_correction.dofmap.index_map.size_global * V_correction.dofmap.index_map_bs
+            all_dofs = np.arange(num_dofs_global)
+            uncut_cells_dofs = np.setdiff1d(all_dofs, cut_cells_dofs)
+
+            phih_correction = dfx.fem.Function(V_correction)
+            phih_correction.interpolate(phih)
+
+            phi_correction = dfx.fem.Function(V_correction)
+            phi_correction.interpolate(self.levelset)
+
+            wh_correction = dfx.fem.Function(V_correction)
+            if self.solution_wh is None:
+                raise ValueError("SOLVER_NAME.solution_wh is None, did you forget to solve ?(SOLVER_NAME.solve)")
+
+            wh_correction.interpolate(self.solution_wh)
+
+            correction_function_V = dfx.fem.Function(V_correction)
+            correction_function_V.x.array[:] = (phih_correction.x.array[:] - phi_correction.x.array[:]) * wh_correction.x.array[:]
+            correction_function_V.x.array[uncut_cells_dofs] = 0.
+        elif refinement_type=='h':
+            """
+            h-refinement boundary correction.
+            correction_function = (φ_h - φ_f) w_f
+            where:
+            - φ_h is the discretization of the levelset in the levelset space.
+            - φ_f is the interpolation of w_h in the h-finer space (based on a mesh locally refined around Ω_h^Γ).
+            All the functions have to be interpolated in the same space (the correction space) prior the computation of the correction function.
+            Then all the functions are interpolated back to the working_mesh in a higher order space (to keep the features from the finer mesh).
+            """
+            if entities_tags.dim != working_mesh.topology.dim - 1:
+                raise ValueError("In 'h' refinement, the entities_tags must be equal to mesh.topology.dim - 1 (facets).")
+
+            cut_facets = entities_tags.find(2)
+
+            # dfx.mesh.refine MODIFIES the input mesh preventing the computation of the estimator below.
+            # To avoid it I follow the dirty trick from https://fenicsproject.discourse.group/t/strange-behavior-after-using-create-mesh/14887/3
+            # by creating a dummy_mesh as a submesh that is in fact a copy of working_mesh.
+            num_cells = working_mesh.topology.index_map(working_mesh.topology.dim).size_global
+            dummy_mesh = dfx.mesh.create_submesh(working_mesh, working_mesh.topology.dim, np.arange(num_cells))[0]
+            dummy_mesh.topology.create_entities(dummy_mesh.topology.dim - 1)
+            correction_mesh = dfx.mesh.refine(dummy_mesh, cut_facets)
+
+            CGhfElement = element("Lagrange",
+                                  correction_mesh.topology.cell_name(),
+                                  self.levelset_space.ufl_element().degree)
+            V_correction = dfx.fem.functionspace(correction_mesh, CGhfElement)
+
+            nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
+                            correction_mesh,
+                            V_correction.element,
+                            working_mesh,
+                            padding=1.e-14)
+
+            phih_correction = dfx.fem.Function(V_correction)
+            phih_correction.interpolate(phih, nmm_interpolation_data=nmm)
+
+            phif_correction = dfx.fem.Function(V_correction)
+            phif_correction.interpolate(self.levelset)
+
+            whf = dfx.fem.Function(V_correction)
+            if self.solution_wh is None:
+                raise ValueError("SOLVER_NAME.solution_wh is None, did you forget to solve ?(SOLVER_NAME.solve)")
+
+            whf.interpolate(self.solution_wh, nmm_interpolation_data=nmm)
+
+            correction_function = dfx.fem.Function(V_correction)
+            correction_function.x.array[:] = (phih_correction.x.array[:] - phif_correction.x.array[:]) * whf.x.array[:]
+
+            CGpfElement = element("Lagrange",
+                                  working_mesh.topology.cell_name(),
+                                  self.levelset_element.degree + 1)
+            V_working = dfx.fem.functionspace(working_mesh, CGpfElement)
+
+            nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
+                            working_mesh,
+                            V_working.element,
+                            correction_mesh,
+                            padding=1.e-14)
+        
+            correction_function_V = dfx.fem.Function(V_working)
+            correction_function_V.interpolate(correction_function, nmm_interpolation_data=nmm)
+        return correction_function_V
+    
     def estimate_residual(self,
                           V0: FunctionSpace | None = None,
                           quadrature_degree: int | None = None,
@@ -817,34 +932,8 @@ class PhiFEMSolver(GenericSolver):
         if self.levelset is None:
             raise ValueError("SOLVER_NAME.levelset is None.")
 
-        phih = self.levelset.interpolate(self.levelset_space)
-
-        levelset_degree = self.levelset_space.element.basix_element.degree
-        CGfElement = element("Lagrange", working_mesh.topology.cell_name(), levelset_degree + 1)
-        Vf = dfx.fem.functionspace(working_mesh, CGfElement)
-        
-        # Get the dofs except those on the cut cells
-        cut_cells = working_cells_tags.find(2)
-        cut_cells_dofs = dfx.fem.locate_dofs_topological(Vf, 2, cut_cells)
-        num_dofs_global = Vf.dofmap.index_map.size_global * Vf.dofmap.index_map_bs
-        all_dofs = np.arange(num_dofs_global)
-        uncut_cells_dofs = np.setdiff1d(all_dofs, cut_cells_dofs)
-
-        phih_2 = dfx.fem.Function(Vf)
-        phih_2.interpolate(phih)
-
-        phi2 = dfx.fem.Function(Vf)
-        phi2.interpolate(self.levelset)
-
-        wh2 = dfx.fem.Function(Vf)
-        if self.solution_wh is None:
-            raise ValueError("SOLVER_NAME.solution_wh is None, did you forget to solve ?(SOLVER_NAME.solve)")
-
-        wh2.interpolate(self.solution_wh)
-
-        correction_function = dfx.fem.Function(Vf)
-        correction_function.x.array[:] = (phih_2.x.array[:] - phi2.x.array[:]) * wh2.x.array[:]
-        correction_function.x.array[uncut_cells_dofs] = 0.
+        # correction_function = self._compute_boundary_correction_function(working_mesh, working_cells_tags, 'p')
+        correction_function = self._compute_boundary_correction_function(working_mesh, self.facets_tags, 'h')
 
         correction_function_V = dfx.fem.Function(self.FE_space)
         correction_function_V.interpolate(correction_function)
@@ -890,8 +979,7 @@ class PhiFEMSolver(GenericSolver):
             eta += eta_boundary
 
         eta_form = dfx.fem.form(eta)
-
-        eta_vec = dfx.fem.petsc.assemble_vector(eta_form)
+        eta_vec = assemble_vector(eta_form)
         eta_h = dfx.fem.Function(V0)
         eta_h.vector.setArray(eta_vec.array[:])
         self.eta_h_H10 = eta_h

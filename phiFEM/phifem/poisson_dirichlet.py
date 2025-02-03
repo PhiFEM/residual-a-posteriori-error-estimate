@@ -56,7 +56,6 @@ class PhiFEMRefinementLoop:
         self.results_saver: ResultsSaver          = ResultsSaver(os.path.join(source_dir,
                                                                               "output_phiFEM",
                                                                               refinement_method))
-        self.source_dir: PathStr                  = source_dir
         self.stabilization_parameter: float       = stabilization_parameter
         self.use_fine_space: bool                 = False
 
@@ -253,7 +252,8 @@ class FEMRefinementLoop:
                  refinement_method: str,
                  expression_levelset: NDArrayFunction,
                  source_dir: PathStr,
-                 geometry_vertices: NDArray | None = None):
+                 geometry_vertices: NDArray | None = None,
+                 save_output: bool = True):
     
         if refinement_method not in ["uniform", "H10", "L2"]:
             raise ValueError("refinement_method must be 'uniform', 'H10' or 'L2'.")
@@ -269,10 +269,16 @@ class FEMRefinementLoop:
         self.quadrature_degree: int | None        = None
         self.rhs: ContinuousFunction | None       = None
         self.refinement_method: str               = refinement_method
-        self.results_saver: ResultsSaver          = ResultsSaver(os.path.join(source_dir,
-                                                                              "output_FEM",
-                                                                              refinement_method))
-        self.source_dir: PathStr                  = source_dir
+        self.save_output: bool                    = save_output
+        self.bbox: NDArray | None                 = None
+
+        self.results_saver: ResultsSaver | None
+        if save_output:
+            self.results_saver = ResultsSaver(os.path.join(source_dir,
+                                                           "output_FEM",
+                                                           refinement_method))
+        else:
+            self.results_saver = None
     
     def set_parameters(self, parameters: dict[str, Any], expressions: dict[str, NDArrayFunction]):
         self.bbox                      = np.asarray(parameters["bbox"])
@@ -287,6 +293,9 @@ class FEMRefinementLoop:
             self.rhs = ContinuousFunction(expressions["expression_rhs"])
         else:
             self.rhs = None
+    
+    def set_bbox(self, bbox: NDArray):
+        self.bbox = bbox
     
     def mesh2d_from_levelset(self, interior_vertices: NDArray | None = None) -> npt.NDArray[np.float64]:
         """ Generate a 2D conforming mesh from a levelset function and saves it as an xdmf mesh.
@@ -353,7 +362,7 @@ class FEMRefinementLoop:
             if cell_block.type == "triangle":
                 triangular_cells = [("triangle", cell_block.data)]
 
-        if self.results_saver.output_path is not None:
+        if self.results_saver is not None:
             meshio.write_points_cells(os.path.join(self.results_saver.output_path, "conforming_mesh.xdmf"), mesh.points, triangular_cells)
         
             # meshio and dolfinx use incompatible Grid names ("Grid" for meshio and "mesh" for dolfinx)
@@ -366,8 +375,8 @@ class FEMRefinementLoop:
             
             tree.write(os.path.join(self.results_saver.output_path, "conforming_mesh.xdmf"), pretty_print=True, xml_declaration=True, encoding="UTF-8")
         
-        with XDMFFile(MPI.COMM_WORLD, os.path.join(self.results_saver.output_path, "conforming_mesh.xdmf"), "r") as fi:
-            self.mesh = fi.read_mesh()
+            with XDMFFile(MPI.COMM_WORLD, os.path.join(self.results_saver.output_path, "conforming_mesh.xdmf"), "r") as fi:
+                self.mesh = fi.read_mesh()
 
         return boundary_vertices
     
