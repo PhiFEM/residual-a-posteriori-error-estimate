@@ -9,10 +9,12 @@ import numpy.typing as npt
 import ufl # type: ignore[import-untyped]
 from   ufl import inner
 
-from phiFEM.phifem.mesh_scripts import plot_mesh_tags
+from phiFEM.phifem.mesh_scripts import plot_mesh_tags, plot_dg0_function
+from phiFEM.phifem.continuous_functions import Levelset
 
 def tag_cells(mesh: Mesh,
-              discrete_levelset: Function,
+              levelset: Levelset,
+              detection_degree: int,
               padding: bool = False,
               plot: bool = False) -> MeshTags:
     """Tag the mesh cells by computing detection = Σ f(dof)/Σ|f(dof)| for each cell.
@@ -33,16 +35,15 @@ def tag_cells(mesh: Mesh,
     # The evaluation points are the dofs of the reference cell.
     # The weights are 1.
     quadrature_points: npt.NDArray[np.float64]
-    levelset_degree = discrete_levelset.function_space.ufl_element().degree
     if mesh.topology.cell_name() == "triangle":
-        xs = np.linspace(0., 1., levelset_degree + 1)
+        xs = np.linspace(0., 1., detection_degree + 1)
         xx, yy = np.meshgrid(xs, xs)
         x_coords = xx.reshape((1, xx.shape[0] * xx.shape[1]))
         y_coords = yy.reshape((1, yy.shape[0] * yy.shape[1]))
         points = np.vstack([x_coords, y_coords])
         quadrature_points = points[:,points[1,:] <= np.ones_like(points[0,:])-points[0,:]]
     elif mesh.topology.cell_name() == "tetrahedron":
-        xs = np.linspace(0., 1., levelset_degree + 1)
+        xs = np.linspace(0., 1., detection_degree + 1)
         xx, yy, zz = np.meshgrid(xs, xs, xs)
         x_coords = xx.reshape((1, xx.shape[0] * xx.shape[1]))
         y_coords = yy.reshape((1, yy.shape[0] * yy.shape[1]))
@@ -61,6 +62,10 @@ def tag_cells(mesh: Mesh,
                                      domain=mesh,
                                      metadata=custom_rule)
     
+    detection_element = element("Lagrange", mesh.topology.cell_name(), detection_degree)
+    detection_space = dfx.fem.functionspace(mesh, detection_element)
+    discrete_levelset = dfx.fem.Function(detection_space)
+    discrete_levelset.interpolate(levelset.expression)
     # We localize at each cell via a DG0 test function.
     DG0Element = element("DG", mesh.topology.cell_name(), 0)
     V0 = dfx.fem.functionspace(mesh, DG0Element)
@@ -75,11 +80,13 @@ def tag_cells(mesh: Mesh,
     cells_detection_denom_form = dfx.fem.form(cells_detection_denom)
     cells_detection_denom_vec = assemble_vector(cells_detection_denom_form)
 
-    # cells_detection_denom_vec is not supposed to be zero, this would mean that the levelset is zero at all dofs in a cell, which is not allowed.
-    # if np.any(np.isclose(cells_detection_denom_vec, 0.)):
-    #     raise ValueError("The discrete levelset vanishes on at least one entire mesh cell.")
-    
-    cells_detection_vec = cells_detection_num_vec.array/cells_detection_denom_vec.array
+    # cells_detection_denom_vec is not supposed to be zero, this would mean that the levelset is zero at all dofs in a cell.
+    # However, in practice it can happen that for a very small cut triangle, cells_detection_denom_vec is of the order of the machine precision.
+    # In this case, we set the value of cells_detection_vec to 0.5, meaning we consider the cell as cut.
+    mask = np.where(cells_detection_denom_vec.array > 0.)
+    cells_detection_vec = np.full_like(cells_detection_num_vec.array, 0.5)
+    cells_detection_vec[mask] = cells_detection_num_vec.array[mask]/cells_detection_denom_vec.array[mask]
+
     detection = dfx.fem.Function(V0)
     detection.x.array[:] = cells_detection_vec
     
@@ -114,18 +121,18 @@ def tag_cells(mesh: Mesh,
         figure, ax = plt.subplots()
         plot_mesh_tags(mesh, cells_tags, ax=ax, display_indices=False)
         plt.savefig("./cells_tags.svg", format="svg", dpi=2400, bbox_inches="tight")
-    
+        figure, ax = plt.subplots()
+        plot_dg0_function(mesh, detection, ax, levelset.expression)
+        plt.savefig("./detection_function.png", bbox_inches="tight") #, format="svg", dpi=2400, bbox_inches="tight")
     return cells_tags
 
 def tag_facets(mesh: Mesh,
-               discrete_levelset: Function,
                cells_tags: MeshTags,
                plot: bool = False) -> MeshTags:
     """Tag the mesh facets.
 
     Args:
         mesh: the background mesh.
-        discrete_levelset: the discretization of the levelset.
         cells_tags: the MeshTags object containing cells tags.
         plot: if True plots the mesh with tags (can drastically slow the computation!).
     

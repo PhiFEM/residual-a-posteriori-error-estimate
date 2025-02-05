@@ -388,6 +388,7 @@ class PhiFEMSolver(GenericSolver):
                  PETSc_solver: PETSc_KSP,
                  ref_strat: str = "uniform",
                  levelset_element: _ElementBase | None = None,
+                 detection_degree: int = 1,
                  box_mode: bool = False,
                  use_fine_space: bool = False,
                  num_step: int = 0,
@@ -428,6 +429,7 @@ class PhiFEMSolver(GenericSolver):
         self.submesh_cells_tags: MeshTags | None  = None
         self.use_fine_space: bool                 = use_fine_space
         self.v0: Function | None                  = None
+        self.detection_degree: int                = detection_degree
 
     def _compute_normal(self, mesh: Mesh) -> Function:
         """ Private method used to compute the outward normal to Omega_h.
@@ -498,7 +500,7 @@ class PhiFEMSolver(GenericSolver):
             raise ValueError("The levelset has no expression.")
         self.levelset = levelset
 
-    def compute_tags(self, detection_element: _ElementBase | None = None, plot: bool = False) -> None:
+    def compute_tags(self, plot: bool = False) -> None:
         """ Compute the mesh tags.
 
         Args:
@@ -512,15 +514,11 @@ class PhiFEMSolver(GenericSolver):
         if self.levelset is None:
             raise ValueError("SOLVER_NAME.levelset is None, did you forget to set the levelset ? (SOLVER_NAME.set_levelset)")
         
-        if detection_element is None:
-            detection_element = self.levelset_element
+        self.bg_mesh_cells_tags= tag_cells(self.mesh,
+                                           self.levelset,
+                                           self.detection_degree,
+                                           plot=plot)
 
-        bg_levelset_space = dfx.fem.functionspace(self.mesh, detection_element)
-        bg_discrete_levelset = self.levelset.interpolate(bg_levelset_space)
-
-        self.bg_mesh_cells_tags = tag_cells(self.mesh,
-                                            bg_discrete_levelset,
-                                            plot=plot)
         working_cells_tags = self.bg_mesh_cells_tags
 
         # Create the submesh and transfer the cells tags from the bg mesh to the submesh.
@@ -551,11 +549,7 @@ class PhiFEMSolver(GenericSolver):
             working_cells_tags = self.submesh_cells_tags
             working_mesh = self.submesh
 
-        working_mesh_levelset_space = dfx.fem.functionspace(working_mesh, detection_element)
-        working_mesh_discrete_levelset = self.levelset.interpolate(working_mesh_levelset_space)
-
         self.facets_tags = tag_facets(working_mesh,
-                                      working_mesh_discrete_levelset,
                                       working_cells_tags,
                                       plot=plot)
     
@@ -739,7 +733,7 @@ class PhiFEMSolver(GenericSolver):
         if self.solution_wh is None:
             raise ValueError("SOLVER_NAME.solution_wh is None, did you forget to solve ? (SOLVER_NAME.solve)")
         return self.solution_wh
-    
+
     def get_levelset_space(self) -> FunctionSpace:
         if self.levelset_space is None:
             raise ValueError("SOLVER_NAME.levelset_space is None, did you forget to set the variational formulation ? (SOLVER_NAME.set_variational_formulation)")
@@ -813,7 +807,7 @@ class PhiFEMSolver(GenericSolver):
 
             # dfx.mesh.refine MODIFIES the input mesh preventing the computation of the estimator below.
             # To avoid it I follow the dirty trick from https://fenicsproject.discourse.group/t/strange-behavior-after-using-create-mesh/14887/3
-            # by creating a dummy_mesh as a submesh that is in fact a copy of working_mesh.
+            # I create a dummy_mesh as a submesh that is in fact a copy of working_mesh and the refinement is made from dummy_mesh.
             num_cells = working_mesh.topology.index_map(working_mesh.topology.dim).size_global
             dummy_mesh = dfx.mesh.create_submesh(working_mesh, working_mesh.topology.dim, np.arange(num_cells))[0]
             dummy_mesh.topology.create_entities(dummy_mesh.topology.dim - 1)

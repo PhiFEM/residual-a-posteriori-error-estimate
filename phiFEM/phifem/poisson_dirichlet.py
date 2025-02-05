@@ -52,6 +52,7 @@ class PhiFEMRefinementLoop:
         self.marking_parameter: float             = 0.3
         self.quadrature_degree: int | None        = None
         self.rhs: ContinuousFunction | None       = None
+        self.ref_degree: float                    = 2
         self.refinement_method: str               = refinement_method
         self.results_saver: ResultsSaver          = ResultsSaver(os.path.join(source_dir,
                                                                               "output_phiFEM",
@@ -166,6 +167,7 @@ class PhiFEMRefinementLoop:
                                          whElement,
                                          petsc_solver,
                                          levelset_element=levelsetElement,
+                                         detection_degree=self.boundary_detection_degree,
                                          use_fine_space=self.use_fine_space,
                                          box_mode=self.box_mode,
                                          num_step=i,
@@ -174,7 +176,7 @@ class PhiFEMRefinementLoop:
 
             phiFEM_solver.set_source_term(self.rhs)
             phiFEM_solver.set_levelset(self.levelset)
-            phiFEM_solver.compute_tags(detection_element=detectionElement, plot=False)
+            phiFEM_solver.compute_tags(plot=True)
             v0, dx, dS, num_dofs = phiFEM_solver.set_variational_formulation(sigma=self.stabilization_parameter,
                                                                              quadrature_degree=self.quadrature_degree)
             phiFEM_solver.assemble()
@@ -217,13 +219,12 @@ class PhiFEMRefinementLoop:
                     self.results_saver.save_function(v0, f"v0_{str(i).zfill(2)}")
 
             if self.exact_error:
-                ref_degree = self.finite_element_degree + self.levelset_degree + 1
                 if self.exact_solution is not None:
                     expression_u_exact = self.exact_solution.expression
                 else:
                     expression_u_exact = None
                 phiFEM_solver.compute_exact_error(self.results_saver,
-                                                  ref_degree=ref_degree,
+                                                  ref_degree=self.ref_degree,
                                                   expression_u_exact=expression_u_exact,
                                                   save_output=self.save_output)
                 phiFEM_solver.compute_efficiency_coef(self.results_saver, norm="H10")
@@ -271,6 +272,7 @@ class FEMRefinementLoop:
         self.refinement_method: str               = refinement_method
         self.save_output: bool                    = save_output
         self.bbox: NDArray | None                 = None
+        self.ref_degree: int                      = 2
 
         self.results_saver: ResultsSaver | None
         if save_output:
@@ -296,6 +298,9 @@ class FEMRefinementLoop:
     
     def set_bbox(self, bbox: NDArray):
         self.bbox = bbox
+    
+    def set_ref_degree(self, ref_degree: float):
+        self.ref_degree = ref_degree
     
     def mesh2d_from_levelset(self, interior_vertices: NDArray | None = None) -> npt.NDArray[np.float64]:
         """ Generate a 2D conforming mesh from a levelset function and saves it as an xdmf mesh.
@@ -448,10 +453,9 @@ class FEMRefinementLoop:
                 self.results_saver.save_mesh    (self.mesh, f"mesh_{str(i).zfill(2)}")
 
             if self.exact_error:
-                ref_degree = self.finite_element_degree + 1
                 expression_u_exact = self.exact_solution.expression
                 FEM_solver.compute_exact_error(self.results_saver,
-                                               ref_degree=ref_degree,
+                                               ref_degree=self.ref_degree,
                                                expression_u_exact=expression_u_exact,
                                                save_output=self.save_output,
                                                save_exact_solution=False)
