@@ -25,6 +25,10 @@ class ResultsSaver:
 	        print(f"{output_path} directory not found, we create it.")
 	        os.mkdir(os.path.join(".", output_path))
 
+        if os.path.isfile(os.path.join(output_path, "results.csv")):
+            print(f"{os.path.join(output_path, "results.csv")} found, we clear it.")
+            os.remove(os.path.join(output_path, "results.csv"))
+
         output_functions_path = os.path.join(output_path, "functions/")
         if not os.path.isdir(output_functions_path):
 	        print(f"{output_functions_path} directory not found, we create it.")

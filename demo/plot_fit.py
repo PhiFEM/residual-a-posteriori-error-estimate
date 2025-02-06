@@ -92,7 +92,7 @@ if __name__=="__main__":
         label_ref_strats = {"H10": "adapt.", "L2": "adapt.", "uniform": "unif."}
     else:
         label_ref_strats = {"H10": "", "L2": "", "uniform": ""}
-    label_solver = {"FEM": "FEM", "phiFEM": r"$\phi$-FEM"}
+    label_solver = {"FEM": "FEM", "phiFEM": r"$\varphi$-FEM"}
     styles_dict={"H10": "--", "L2": "--", "uniform": "-"}
     # cutoffs_dict={"H10": -10, "L2": -10, "uniform": -5}
     cutoffs_dict={"H10": 1, "L2": 1, "uniform": 1}
@@ -112,7 +112,7 @@ if __name__=="__main__":
                 label = f"{label_ref}"
             plot_fit(ax, data_dir, norm, label, style=style+marker_symb, cutoff=cutoff, list_dofs=tuple_lst_dofs, list_vals=tuple_lst_vals)
     
-    for i, slope in zip(range(2), [-0.39, -0.45]):
+    for i, slope in zip(range(2), [-0.5, -0.5]):
         lst_dofs = tuple_lst_dofs[i]
         lst_vals = tuple_lst_vals[i]
         if len(lst_vals) > 0:

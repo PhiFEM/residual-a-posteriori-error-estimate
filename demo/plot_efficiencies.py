@@ -10,14 +10,15 @@ plt.style.use(['ggplot',"./plots.mplstyle"])
 
 def plot_efficiencies(data_dir, norm, label, style="-^"):
     df = pd.read_csv(os.path.join(data_dir, "results.csv"))
-    dofs = df["dofs"].values
+    iterations = np.arange(len(df["dofs"].values))
     key2label = {"H10 efficiency": r"$\eta/|u_{\mathrm{ref}} - u_h|_{H^1(\Omega)}$",
                  "L2 efficiency":  r"$\nu/\|u_{\mathrm{ref}} - u_h\|_{L^2(\Omega)}$"}
     
     for key in [k for k in df.keys() if "efficiency" in k and norm in k]:
+        print(key)
         vals = df[key].values
         keylab = key2label[key]
-        plt.plot(dofs, vals, style, label=keylab + ", " + label)
+        plt.plot(iterations, vals, style, label=keylab + ", " + label)
 
 if __name__=="__main__":
     demos_list = [demo for demo in next(os.walk("."))[1] if "__" not in demo]
@@ -42,7 +43,8 @@ if __name__=="__main__":
     norm = args.norm
     ref_strats = args.refinement
 
-    plt.figure()
+    fig = plt.figure()
+    ax = fig.add_subplot()
     save_dir = os.path.join(parent_dir, test_case, "output_" + mode)
     
     tc2title = {"pdt_sines": "Product of sines",
@@ -65,7 +67,7 @@ if __name__=="__main__":
         label_ref_strats = {"H10": "adapt.", "L2": "adapt.", "uniform": "unif."}
     else:
         label_ref_strats = {"H10": "", "L2": "", "uniform": ""}
-    label_solver = {"FEM": "FEM", "phiFEM": r"$\phi$-FEM"}
+    label_solver = {"FEM": "FEM", "phiFEM": r"$\varphi$-FEM"}
     styles_dict={"H10": "--", "L2": "--", "uniform": "-"}
     cutoffs_dict={"H10": -10, "L2": -10, "uniform": -5}
     
@@ -82,6 +84,7 @@ if __name__=="__main__":
                 label = f"{label_ref}"
             plot_efficiencies(data_dir, norm, label, style=style+marker)
     
-    plt.xlabel("dofs")
+    plt.xlabel("Iteration num.")
+    ax.set_ylim([0., 10.])
     plt.legend()
     plt.savefig(os.path.join(save_dir, "plot_efficiencies_" + norm + "_" + ref_strats + ".pdf"), bbox_inches="tight")
