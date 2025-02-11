@@ -64,6 +64,7 @@ class PhiFEMRefinementLoop:
         self.bbox                      = np.asarray(parameters["bbox"])
         self.boundary_detection_degree = parameters["boundary_detection_degree"]
         self.box_mode                  = parameters["box_mode"] 
+        self.boundary_refinement_type  = parameters["boundary_refinement_type"] 
         self.exact_error               = parameters["exact_error"]
         self.finite_element_degree     = parameters["finite_element_degree"]
         self.levelset_degree           = parameters["levelset_degree"]
@@ -90,6 +91,11 @@ class PhiFEMRefinementLoop:
     
     def set_box_mode(self, box_mode: bool):
         self.box_mode = box_mode
+    
+    def set_boundary_refinement_type(self, boundary_refinement_type: str):
+        if boundary_refinement_type not in ['h', 'p']:
+            raise ValueError("boundary_refinement_type must be 'h' or 'p'.")
+        self.boundary_refinement_type = boundary_refinement_type
     
     def set_exact_error_on(self, exact_error: bool):
         self.exact_error = exact_error
@@ -152,7 +158,6 @@ class PhiFEMRefinementLoop:
         for i in range(self.iteration_number):
             whElement        = element("Lagrange", working_mesh.topology.cell_name(), self.finite_element_degree)
             levelsetElement  = element("Lagrange", working_mesh.topology.cell_name(), self.levelset_degree)
-            detectionElement = element("Lagrange", working_mesh.topology.cell_name(), self.boundary_detection_degree)
 
             # Parametrization of the PETSc solver
             options = Options()
@@ -170,6 +175,7 @@ class PhiFEMRefinementLoop:
                                          detection_degree=self.boundary_detection_degree,
                                          use_fine_space=self.use_fine_space,
                                          box_mode=self.box_mode,
+                                         boundary_refinement_type=self.boundary_refinement_type,
                                          num_step=i,
                                          ref_strat=self.refinement_method,
                                          save_output=self.save_output)

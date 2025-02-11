@@ -14,3 +14,4 @@ types-colorama
 types-decorator
 types-jsonschema
 types-six
+yq

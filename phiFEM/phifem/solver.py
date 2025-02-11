@@ -390,6 +390,7 @@ class PhiFEMSolver(GenericSolver):
                  levelset_element: _ElementBase | None = None,
                  detection_degree: int = 1,
                  box_mode: bool = False,
+                 boundary_refinement_type: str = 'h',
                  use_fine_space: bool = False,
                  num_step: int = 0,
                  save_output: bool = True) -> None:
@@ -415,6 +416,9 @@ class PhiFEMSolver(GenericSolver):
                          save_output=save_output)
 
         self.bg_mesh_cells_tags: MeshTags | None  = None
+        if boundary_refinement_type not in ['h', 'p']:
+            raise ValueError("boundary_refinement_type must be 'h' or 'p'.")
+        self.boundary_refinement_type: str        = boundary_refinement_type
         self.facets_tags: MeshTags | None         = None
         self.FE_space: FunctionSpace | None       = None
         self.levelset: Levelset | None            = None
@@ -796,7 +800,7 @@ class PhiFEMSolver(GenericSolver):
             correction_function = (φ_h - φ_f) w_f
             where:
             - φ_h is the discretization of the levelset in the levelset space.
-            - φ_f is the interpolation of w_h in the h-finer space (based on a mesh locally refined around Ω_h^Γ).
+            - φ_f is the interpolation of φ in the h-finer space (based on a mesh locally refined around Ω_h^Γ).
             All the functions have to be interpolated in the same space (the correction space) prior the computation of the correction function.
             Then all the functions are interpolated back to the working_mesh in a higher order space (to keep the features from the finer mesh).
             """
@@ -926,8 +930,10 @@ class PhiFEMSolver(GenericSolver):
         if self.levelset is None:
             raise ValueError("SOLVER_NAME.levelset is None.")
 
-        # correction_function = self._compute_boundary_correction_function(working_mesh, working_cells_tags, 'p')
-        correction_function = self._compute_boundary_correction_function(working_mesh, self.facets_tags, 'h')
+        if self.boundary_refinement_type=='p':
+            correction_function = self._compute_boundary_correction_function(working_mesh, working_cells_tags, self.boundary_refinement_type)
+        else:
+            correction_function = self._compute_boundary_correction_function(working_mesh, self.facets_tags, self.boundary_refinement_type)
 
         correction_function_V = dfx.fem.Function(self.FE_space)
         correction_function_V.interpolate(correction_function)
