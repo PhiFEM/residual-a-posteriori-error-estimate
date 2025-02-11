@@ -18,11 +18,13 @@ from   typing import Any, cast, Tuple
 import ufl # type: ignore[import-untyped]
 from   ufl import inner, jump, grad, div, avg
 from   ufl.classes import Measure # type: ignore[import-untyped]
+import matplotlib.pyplot as plt
 
 from phiFEM.phifem.compute_meshtags import tag_cells, tag_facets
 from phiFEM.phifem.continuous_functions import ContinuousFunction, ExactSolution, Levelset
 from phiFEM.phifem.mesh_scripts import compute_outward_normal
 from phiFEM.phifem.saver import ResultsSaver
+from phiFEM.phifem.mesh_scripts import reshape_facets_map, plot_dg0_function
 
 PathStr = PathLike[str] | str
 NDArrayFunction = Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]
@@ -810,6 +812,14 @@ class PhiFEMSolver(GenericSolver):
             if entities_tags.dim != working_mesh.topology.dim - 1:
                 raise ValueError("In 'h' refinement, the entities_tags must be equal to mesh.topology.dim - 1 (facets).")
 
+            cut_cells = self.submesh_cells_tags.find(2)
+            DG0Element = element("DG",
+                                  working_mesh.topology.cell_name(),
+                                  0)
+            V0 = dfx.fem.functionspace(working_mesh, DG0Element)
+            v0 = dfx.fem.Function(V0)
+
+            v0.x.array[cut_cells] = 2.
             cut_facets = entities_tags.find(2)
 
             # dfx.mesh.refine MODIFIES the input mesh preventing the computation of the estimator below.
@@ -824,6 +834,50 @@ class PhiFEMSolver(GenericSolver):
                                   correction_mesh.topology.cell_name(),
                                   self.levelset_space.ufl_element().degree)
             V_correction = dfx.fem.functionspace(correction_mesh, CGhfElement)
+            DG0Element_correction = element("DG",
+                                            correction_mesh.topology.cell_name(),
+                                            0)
+            V0_correction = dfx.fem.functionspace(correction_mesh, DG0Element_correction)
+            v0_correction = dfx.fem.Function(V0_correction)
+
+            nmm_V0 = dfx.fem.create_nonmatching_meshes_interpolation_data(
+                                correction_mesh,
+                                V0_correction.element,
+                                working_mesh,
+                                padding=1.e-14)
+
+            v0_correction.interpolate(v0, nmm_interpolation_data=nmm_V0)
+
+            cdim = correction_mesh.topology.dim
+            vdim = 0
+            correction_mesh.topology.create_connectivity(cdim,vdim)
+            correction_mesh.topology.create_connectivity(vdim,cdim)
+            c2v_connect = correction_mesh.topology.connectivity(cdim, vdim)
+            num_vertices_per_cell = len(c2v_connect.links(0))
+            c2v_map = np.reshape(c2v_connect.array, (-1, num_vertices_per_cell))
+            v2c_connect = correction_mesh.topology.connectivity(vdim, cdim)
+            extended_cut_cells = []
+            cut_cells_correction = np.where(v0_correction.x.array == 2.)
+            for vertices in c2v_map[cut_cells_correction]:
+                for vertex in vertices:
+                    extended_cut_cells.append(v2c_connect.links(vertex))
+            extended_cut_cells = np.unique(np.hstack(extended_cut_cells))
+            neighbors_cut_cells = np.setdiff1d(extended_cut_cells, cut_cells_correction)
+            v0_correction.x.array[neighbors_cut_cells] = 1.
+
+            detection_expression = self.levelset.get_detection_expression()
+            figure, ax = plt.subplots()
+            plt.savefig("./cells_tags.svg", format="svg", dpi=2400, bbox_inches="tight")
+            figure, ax = plt.subplots()
+            plot_dg0_function(correction_mesh,
+                              v0_correction,
+                              ax,
+                              detection_expression,
+                              vbounds=(0., 2.),
+                              cmap_name="Wistia",
+                              display_legend=False,
+                              display_axes=False)
+            plt.savefig("./correction_mesh.png", bbox_inches="tight") #, format="svg", dpi=2400, bbox_inches="tight")
 
             nmm = dfx.fem.create_nonmatching_meshes_interpolation_data(
                             correction_mesh,
