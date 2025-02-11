@@ -222,8 +222,12 @@ def plot_dg0_function(
     mesh: Mesh,
     function: Function,
     ax: plt.Axes | None = None,
-    expression_levelset: Callable[..., np.ndarray] | None = None
-) -> plt.Axes:
+    expression_levelset: Callable[..., np.ndarray] | None = None,
+    vbounds: tuple = (-1., 1.),
+    label: str | None = None,
+    cmap_name: str = "RdYlBu",
+    display_legend: bool = True,
+    display_axes: bool = True) -> plt.Axes:
     """Plot a mesh tags object on the provided (or, if None, the current) axes object.
     
     Args:
@@ -238,12 +242,15 @@ def plot_dg0_function(
     """
     if ax is None:
         ax = plt.gca()  # type: ignore
+    
+    if not display_axes:
+        ax.set_axis_off()
     ax.set_aspect("equal")
     points = mesh.geometry.x
 
     # Get unique tags and create a custom colormap
-    cmap = cm.get_cmap("RdYlBu")
-    norm = mcolors.Normalize(vmin=-1, vmax=1)
+    cmap = cm.get_cmap(cmap_name)
+    norm = mcolors.Normalize(vmin=vbounds[0], vmax=vbounds[1])
 
     cells_map = mesh.topology.index_map(mesh.topology.dim)
     num_cells = cells_map.size_global
@@ -261,9 +268,14 @@ def plot_dg0_function(
                             cmap=cmap,
                             norm=norm)
     divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-    colorbar = plt.colorbar(mappable, cax=cax, norm=norm)
-    colorbar.set_label("Detection function value")
+    if display_legend:
+        cax = divider.append_axes("right", size="5%", pad=0.05)
+        colorbar = plt.colorbar(mappable, cax=cax, norm=norm)
+        legend_label = ""
+        if label is not None:
+            legend_label = label
+        colorbar.set_label(legend_label)
+
 
     if expression_levelset is not None:
         x_min, x_max = np.min(points[:, 0]), np.max(points[:, 0])

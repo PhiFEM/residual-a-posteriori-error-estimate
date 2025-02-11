@@ -743,7 +743,10 @@ class PhiFEMSolver(GenericSolver):
             raise ValueError("SOLVER_NAME.levelset_space is None, did you forget to set the variational formulation ? (SOLVER_NAME.set_variational_formulation)")
         return self.levelset_space
     
-    def _compute_boundary_correction_function(self, working_mesh: Mesh, entities_tags: MeshTags, refinement_type: str) -> Function:
+    def _compute_boundary_correction_function(self,
+                                              working_mesh: Mesh,
+                                              entities_tags: MeshTags,
+                                              refinement_type: str) -> Function:
         """ Compute the boundary correction function.
 
         Args:
@@ -810,7 +813,7 @@ class PhiFEMSolver(GenericSolver):
             cut_facets = entities_tags.find(2)
 
             # dfx.mesh.refine MODIFIES the input mesh preventing the computation of the estimator below.
-            # To avoid it I follow the dirty trick from https://fenicsproject.discourse.group/t/strange-behavior-after-using-create-mesh/14887/3
+            # To avoid it I follow the trick from https://fenicsproject.discourse.group/t/strange-behavior-after-using-create-mesh/14887/3
             # I create a dummy_mesh as a submesh that is in fact a copy of working_mesh and the refinement is made from dummy_mesh.
             num_cells = working_mesh.topology.index_map(working_mesh.topology.dim).size_global
             dummy_mesh = dfx.mesh.create_submesh(working_mesh, working_mesh.topology.dim, np.arange(num_cells))[0]

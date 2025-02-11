@@ -25,9 +25,12 @@ def expression_levelset(x):
     val = -np.sin(np.pi * (rotation(-tilt_angle, x - rotation(tilt_angle, vect))[0, :])) * \
            np.sin(np.pi * (rotation(-tilt_angle, x - rotation(tilt_angle, vect))[1, :]))
 
-    val_ext = tilted_square(x)
-    val[val_ext > 0.] = val_ext[val_ext > 0.]
+    # val_ext = tilted_square(x)
+    # val[val_ext > 0.] = val_ext[val_ext > 0.]
     return val
+
+def expression_detection_levelset(x):
+    return tilted_square(x)
 
 def expression_u_exact(x):
     return jnp.sin(2. * jnp.pi * rotation(-tilt_angle, x)[0, :]) * \

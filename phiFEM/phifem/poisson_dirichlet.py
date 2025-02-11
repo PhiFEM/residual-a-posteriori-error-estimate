@@ -30,7 +30,7 @@ class PhiFEMRefinementLoop:
                  initial_mesh_size: float,
                  iteration_number: int,
                  refinement_method: str,
-                 expression_levelset: NDArrayFunction,
+                 levelset: Levelset,
                  stabilization_parameter: float,
                  source_dir: PathStr):
         
@@ -47,7 +47,7 @@ class PhiFEMRefinementLoop:
         self.initial_mesh_size: float             = initial_mesh_size
         self.initial_bg_mesh: Mesh | None         = None
         self.iteration_number: int                = iteration_number
-        self.levelset: Levelset                   = Levelset(expression_levelset)
+        self.levelset: Levelset                   = levelset
         self.levelset_degree: int                 = 1
         self.marking_parameter: float             = 0.3
         self.quadrature_degree: int | None        = None
@@ -257,7 +257,7 @@ class FEMRefinementLoop:
                  initial_mesh_size: float,
                  iteration_number: int,
                  refinement_method: str,
-                 expression_levelset: NDArrayFunction,
+                 levelset: Levelset,
                  source_dir: PathStr,
                  geometry_vertices: NDArray | None = None,
                  save_output: bool = True):
@@ -271,7 +271,7 @@ class FEMRefinementLoop:
         self.geometry_vertices: NDArray | None    = geometry_vertices
         self.initial_mesh_size: float             = initial_mesh_size
         self.iteration_number: int                = iteration_number
-        self.levelset: Levelset                   = Levelset(expression_levelset)
+        self.levelset: Levelset                   = levelset
         self.marking_parameter: float             = 0.3
         self.quadrature_degree: int | None        = None
         self.rhs: ContinuousFunction | None       = None
