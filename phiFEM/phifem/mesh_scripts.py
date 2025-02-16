@@ -217,7 +217,6 @@ def plot_mesh_tags(
     
     return ax
 
-
 def plot_dg0_function(
     mesh: Mesh,
     function: Function,
