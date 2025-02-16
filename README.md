@@ -45,7 +45,7 @@ Replace `YOUR_ENGINE` by `docker`, `podman` or your favorite container engine (t
    bash run_image.sh
    ```
 
-### Generate the publication results
+### Generate all the results at once
 
 Inside the container:
    
