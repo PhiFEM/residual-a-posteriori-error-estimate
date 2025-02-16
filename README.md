@@ -1,8 +1,8 @@
 # Residual-based a posteriori error estimates with boundary correction for $\varphi$-FEM
 
-This repository contains the code used to generate the numerical results in the publication:
+This repository contains the code used to generate the numerical results in the study:
 
-*Residual-based a posteriori error estimates with boundary correction for $\varphi$-FEM*  
+*Residual-based a posteriori error estimates with boundary correction for φ-FEM*  
 R. Becker, R. Bulle, M. Duprez, V. Lleras  
 [https://hal.science/hal-04931977](https://hal.science/hal-04931977)  
 
